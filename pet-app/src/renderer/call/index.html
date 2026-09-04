@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>肆的通话</title>
+</head>
+<body>
+  <div id="call">
+    <div class="card">
+      <div class="topbar">
+        <div class="call-title">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-text">通话</span>
+        </div>
+        <div class="topbar-actions">
+          <div class="size-switch" id="size-switch">
+            <button class="size-btn" data-size="0" title="小窗口">小</button>
+            <button class="size-btn active" data-size="1" title="中窗口">中</button>
+            <button class="size-btn" data-size="2" title="大窗口">大</button>
+          </div>
+          <button class="icon-btn" id="new-chat-btn" title="新建对话（清空上下文）">🔄</button>
+          <button class="icon-btn" id="settings-toggle" title="设置">⚙️</button>
+          <button class="icon-btn" id="close-btn" title="关闭">×</button>
+        </div>
+      </div>
+
+      <div class="config-panel" id="config-panel" hidden>
+        <div class="config-row">
+          <label>模型</label>
+          <div class="provider-switch">
+            <button class="provider-btn" id="provider-deepseek" type="button">DeepSeek</button>
+            <button class="provider-btn" id="provider-coze" type="button">Coze</button>
+          </div>
+        </div>
+
+        <div class="provider-block" id="block-deepseek">
+          <div class="config-row">
+            <label for="ds-key">DeepSeek API Key</label>
+            <input type="password" id="ds-key" placeholder="sk- 开头" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="config-row">
+            <label for="ds-model">模型</label>
+            <select id="ds-model">
+              <option value="deepseek-chat">deepseek-chat（快，日常）</option>
+              <option value="deepseek-reasoner">deepseek-reasoner（推理）</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="provider-block" id="block-coze" hidden>
+          <div class="config-row">
+            <label for="coze-token">Coze API Token</label>
+            <input type="password" id="coze-token" placeholder="pat_ 开头" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="config-row">
+            <label for="coze-bot">Bot ID</label>
+            <input type="text" id="coze-bot" placeholder="你的扣子 Bot ID" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+
+        <div class="config-row config-inline">
+          <div>
+            <div class="setting-label">朗读回复（TTS）</div>
+            <div class="setting-desc">agent 回复后自动读出来</div>
+          </div>
+          <div class="toggle active" id="toggle-tts"></div>
+        </div>
+        <div class="config-row config-inline">
+          <div>
+            <div class="setting-label">AI 弹幕（摸头/认亲等互动气泡）</div>
+            <div class="setting-desc">用 DeepSeek 生成肆风格的互动反馈，需先填好 API Key</div>
+          </div>
+          <div class="toggle" id="toggle-aibubble"></div>
+        </div>
+        <div class="config-row config-actions">
+          <button class="primary-btn" id="save-config">保存设置</button>
+          <span class="save-hint" id="save-hint"></span>
+        </div>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="empty-hint">和肆说点什么吧</div>
+      </div>
+
+      <div class="inputbar">
+        <input type="text" id="chat-input" placeholder="输入消息…" autocomplete="off" spellcheck="false" maxlength="2000">
+        <button class="send-btn" id="send-btn">发送</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
