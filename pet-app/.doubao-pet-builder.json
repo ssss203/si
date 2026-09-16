@@ -5,7 +5,7 @@
   "criticalFileHashes": {
     "forge.config.js": "d5c8432b8dbe5d263683e892c2d929b37b1d7fd80b6bb36392b04054e0b9d563",
     "webpack.renderer.config.js": "f0cbfe9f4f805126d0dd854b4024df83b2d08c2d67145ecae6bc29e5268ddda1",
-    "src/main.ts": "fcd4021c09e725fa09e9e0dae02ab00e77d681b16f262a59d99d67ecf6d9c162",
+    "src/main.ts": "eeba49f3ffec234d67379f665f23491b878f7107d4b859171177847375fed891",
     "src/preload.ts": "720a6aae57e93cbaff91291c8a25eefa0e83037039816aaba0beed2d3115c0e9",
     "src/main/data-validation.ts": "b718a4e4648109c5c1f6d054221e5d7f010bf40bf68f98adfbafdd58d3a0baa8",
     "src/renderer/pet/state-machine.ts": "c361129351654bce7fb593152e0ff936df8aa5e9f1f2e06ce9fc7a1beffa49d3",

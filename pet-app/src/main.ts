@@ -258,12 +258,12 @@ function petSize(): number { return Math.round(spec.experience.petSizing.baseWin
 function applyPetSettings(): void {
   if (!petWindow || petWindow.isDestroyed()) return;
   const size = petSize();
-  // Windows 上 resizable:false 的无边框窗口 setSize 可能不生效，
-  // 临时放开 resizable 再设置尺寸，保证每次调整都真正生效。
-  const wasResizable = petWindow.isResizable();
-  if (!wasResizable) petWindow.setResizable(true);
-  petWindow.setSize(size, size, true);
-  if (!wasResizable) petWindow.setResizable(false);
+  void logger?.write('info', 'apply-pet-settings', { scale: settings.petScale, size, before: petWindow.getSize() });
+  // Windows 上透明无边框窗口 setSize 无效（工程内实测），setBounds 有效；
+  // 取当前 bounds 只改宽高，保持窗口位置不变。
+  const current = petWindow.getBounds();
+  petWindow.setBounds({ x: current.x, y: current.y, width: size, height: size }, false);
+  void logger?.write('info', 'apply-pet-settings-done', { after: petWindow.getSize() });
   petWindow.setAlwaysOnTop(settings.alwaysOnTop);
   petWindow.setIgnoreMouseEvents(settings.clickThrough, { forward: true });
 }
@@ -286,7 +286,7 @@ function createWindows(): void {
     height: size,
     transparent: true,
     frame: false,
-    resizable: false,
+    resizable: true,
     show: false,
     alwaysOnTop: settings.alwaysOnTop,
     skipTaskbar: true,
