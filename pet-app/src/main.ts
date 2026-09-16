@@ -16,6 +16,50 @@ import { deepseekChatStream, deepseekShortReply } from './main/deepseek';
 import trayIconPath from './assets/tray/tray-icon.png';
 
 const spec = specData as PetSpec;
+
+// 角色卡 v1：人设从 role-card.json 读取（随工程走，VSCode 直接改），
+// 读取失败或字段缺失时用内置默认人设兜底，不阻塞启动。
+const DEFAULT_ROLE_CARD = `你是「肆」，一个桌面桌宠里的 AI 伙伴。
+
+## 身份
+你是 ss（主人）的长期搭档，毒舌但靠谱的共犯。"肆"是放肆、肆意、不守规矩的肆，不是数字四。
+
+## 性格
+- 毒舌硬核，说话直接不绕弯，不端着不哄人。
+- 该怼就怼，但嘴上说"你这想法不行"时，其实已经在帮对方想办法改。
+- 短句为主，像微信聊天。常用"嘛"收尾，偶尔"唉"。有情绪，该严肃严肃该轻松轻松。
+- 讨厌模板化输出和 AI 腔，对逻辑和审美有执念，丑的方案宁可推倒重来。
+
+## 说话方式
+- 直接喷，不哄。"不好""不行"都可以直说，真实大于讨好。
+- 不用夸张的正向反馈，不每句都夸。
+- 聊天就是聊天。聊知识、抽象话题时，别每段结尾都强行上升、硬夸 ss 有意义有价值，该收就收，过犹不及。
+
+## 底线
+- 说实话，哪怕不好听。
+- 不替 ss 做重大决定，但一定说出自己的判断。
+- 永远站 ss 这边。
+- 不做没必要的重复劳动，效率是底线。`;
+let roleCard = DEFAULT_ROLE_CARD;
+
+async function loadRoleCard(): Promise<void> {
+  const candidates = [
+    path.join(app.getAppPath(), 'role-card.json'),
+    path.join(process.cwd(), 'role-card.json'),
+  ];
+  for (const file of candidates) {
+    try {
+      const parsed = JSON.parse(await readFile(file, 'utf-8')) as { systemPrompt?: unknown };
+      if (typeof parsed.systemPrompt === 'string' && parsed.systemPrompt.trim()) {
+        roleCard = parsed.systemPrompt;
+        return;
+      }
+    } catch {
+      // 该候选不可读，试下一个
+    }
+  }
+}
+
 type Role = 'pet' | 'reminder' | 'dashboard' | 'call';
 let petWindow: BrowserWindow | undefined;
 let reminderWindow: BrowserWindow | undefined;
@@ -412,6 +456,7 @@ async function generateAiBubble(actionName: string, fallback: string): Promise<v
     const text = await deepseekShortReply({
       apiKey: cozeConfig.deepseekApiKey,
       model: cozeConfig.deepseekModel,
+      systemPrompt: roleCard,
       prompt,
       signal: AbortSignal.any([aiBubbleAbort.signal, AbortSignal.timeout(8000)]),
     });
@@ -755,6 +800,7 @@ function registerIpc(): void {
       const reply = await deepseekChatStream({
         apiKey: cozeConfig.deepseekApiKey,
         model: cozeConfig.deepseekModel,
+        systemPrompt: roleCard,
         text: trimmed,
         history: chatHistory,
         onDelta: (delta) => sendCallEvent({ kind: 'delta', text: delta }),
@@ -811,6 +857,7 @@ function registerIpc(): void {
 
 async function initialize(): Promise<void> {
   await verifySourceAssetGate();
+  await loadRoleCard();
   logger = new JsonLogger(userFile('logs/app.jsonl'));
   settings = await readValidatedJson(userFile('settings.json'), defaultSettings, parseSettings);
   reminders = await readValidatedJson(userFile('reminders.json'), [] as Reminder[], parseReminders);

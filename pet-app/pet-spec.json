@@ -162,7 +162,7 @@
         "idle/idle-03.png",
         "idle/idle-04.png"
       ],
-      "frameDurationMs": 900,
+      "frameDurationMs": 350,
       "loop": true,
       "priority": 10,
       "interrupt": "resume",
@@ -210,7 +210,7 @@
         "happy/happy-04.png",
         "happy/happy-05.png"
       ],
-      "frameDurationMs": 110,
+      "frameDurationMs": 200,
       "loop": false,
       "priority": 70,
       "interrupt": "restart",
