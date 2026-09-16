@@ -11,7 +11,7 @@ import { atomicWriteJson, uniqueDestination } from './main/persistence';
 import { TypingListener } from './main/typing-listener';
 import { localDateKey, nextReminderDelay, parsePersistedStats, parseReminders, parseSettings, type PersistedStats } from './main/data-validation';
 import { readValidatedJson } from './main/persistence';
-import { cozeChatStream, defaultCozeUserId } from './main/coze';
+
 import { deepseekChatStream, deepseekShortReply } from './main/deepseek';
 import trayIconPath from './assets/tray/tray-icon.png';
 
@@ -66,10 +66,6 @@ const defaultStats: PersistedStats = {
 };
 
 const defaultChatConfig: ChatConfig = {
-  provider: 'deepseek',
-  apiToken: '',
-  botId: '',
-  userId: defaultCozeUserId(),
   deepseekApiKey: '',
   deepseekModel: 'deepseek-chat',
   ttsEnabled: true,
@@ -84,10 +80,6 @@ function parseChatConfig(value: unknown): ChatConfig {
   if (!value || typeof value !== 'object') return fallback;
   const obj = value as Record<string, unknown>;
   return {
-    provider: obj.provider === 'coze' || obj.provider === 'deepseek' ? obj.provider : fallback.provider,
-    apiToken: typeof obj.apiToken === 'string' ? obj.apiToken : fallback.apiToken,
-    botId: typeof obj.botId === 'string' ? obj.botId : fallback.botId,
-    userId: typeof obj.userId === 'string' && obj.userId ? obj.userId : defaultCozeUserId(),
     deepseekApiKey: typeof obj.deepseekApiKey === 'string' ? obj.deepseekApiKey : fallback.deepseekApiKey,
     deepseekModel: typeof obj.deepseekModel === 'string' && obj.deepseekModel ? obj.deepseekModel : fallback.deepseekModel,
     ttsEnabled: typeof obj.ttsEnabled === 'boolean' ? obj.ttsEnabled : fallback.ttsEnabled,
@@ -398,7 +390,7 @@ async function triggerInteraction(id: string): Promise<InteractionResult> {
   await persistStats();
   const result: InteractionResult = { interaction, feedback, stats: publicStats() };
   // AI 弹幕开启时：不弹默认话，只触发互动动画，等模型回复到达后只弹 AI 话（失败才回落默认）
-  const aiBubbleOn = cozeConfig.aiBubbles && cozeConfig.provider === 'deepseek' && cozeConfig.deepseekApiKey;
+  const aiBubbleOn = cozeConfig.aiBubbles && cozeConfig.deepseekApiKey;
   sendActivity({
     kind: 'interaction',
     stateId: interaction.stateId,
@@ -737,15 +729,11 @@ function registerIpc(): void {
     assertSender(event, ['call']);
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Invalid call config patch');
     const obj = patch as Record<string, unknown>;
-    const allowed = new Set(['provider', 'apiToken', 'botId', 'userId', 'deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles']);
+    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles']);
     for (const key of Object.keys(obj)) {
       if (!allowed.has(key)) throw new TypeError(`Unknown call config field: ${key}`);
     }
-    if ('apiToken' in obj && (typeof obj.apiToken !== 'string' || obj.apiToken.length > 200)) throw new TypeError('Invalid apiToken');
-    if ('botId' in obj && (typeof obj.botId !== 'string' || obj.botId.length > 100)) throw new TypeError('Invalid botId');
-    if ('userId' in obj && (typeof obj.userId !== 'string' || !obj.userId || obj.userId.length > 64)) throw new TypeError('Invalid userId');
     if ('ttsEnabled' in obj && typeof obj.ttsEnabled !== 'boolean') throw new TypeError('Invalid ttsEnabled');
-    if ('provider' in obj && obj.provider !== 'coze' && obj.provider !== 'deepseek') throw new TypeError('Invalid provider');
     if ('deepseekApiKey' in obj && (typeof obj.deepseekApiKey !== 'string' || obj.deepseekApiKey.length > 200)) throw new TypeError('Invalid deepseekApiKey');
     if ('deepseekModel' in obj && (typeof obj.deepseekModel !== 'string' || !obj.deepseekModel || obj.deepseekModel.length > 100)) throw new TypeError('Invalid deepseekModel');
     if ('aiBubbles' in obj && typeof obj.aiBubbles !== 'boolean') throw new TypeError('Invalid aiBubbles');
@@ -763,32 +751,19 @@ function registerIpc(): void {
     sendCallEvent({ kind: 'delta', text: '' });
     let replyText = '';
     try {
-      if (cozeConfig.provider === 'deepseek') {
-        if (!cozeConfig.deepseekApiKey) throw new Error('请先在通话设置里填写 DeepSeek API Key');
-        const reply = await deepseekChatStream({
-          apiKey: cozeConfig.deepseekApiKey,
-          model: cozeConfig.deepseekModel,
-          text: trimmed,
-          history: chatHistory,
-          onDelta: (delta) => sendCallEvent({ kind: 'delta', text: delta }),
-          signal: callAbort.signal,
-        });
-        replyText = reply.text;
-        chatHistory.push({ role: 'user', content: trimmed });
-        chatHistory.push({ role: 'assistant', content: replyText });
-        if (chatHistory.length > 40) chatHistory = chatHistory.slice(-40);
-      } else {
-        if (!cozeConfig.apiToken || !cozeConfig.botId) throw new Error('请先在通话设置里填写 Coze API Token 和 Bot ID');
-        const reply = await cozeChatStream({
-          apiToken: cozeConfig.apiToken,
-          botId: cozeConfig.botId,
-          userId: cozeConfig.userId,
-          text: trimmed,
-          onDelta: (delta) => sendCallEvent({ kind: 'delta', text: delta }),
-          signal: callAbort.signal,
-        });
-        replyText = reply.text;
-      }
+      if (!cozeConfig.deepseekApiKey) throw new Error('请先在通话设置里填写 DeepSeek API Key');
+      const reply = await deepseekChatStream({
+        apiKey: cozeConfig.deepseekApiKey,
+        model: cozeConfig.deepseekModel,
+        text: trimmed,
+        history: chatHistory,
+        onDelta: (delta) => sendCallEvent({ kind: 'delta', text: delta }),
+        signal: callAbort.signal,
+      });
+      replyText = reply.text;
+      chatHistory.push({ role: 'user', content: trimmed });
+      chatHistory.push({ role: 'assistant', content: replyText });
+      if (chatHistory.length > 40) chatHistory = chatHistory.slice(-40);
       sendCallEvent({ kind: 'status', status: 'speaking' });
       sendCallEvent({ kind: 'reply', text: replyText, turn: { role: 'assistant', content: replyText } });
       sendCallEvent({ kind: 'status', status: 'idle' });
@@ -796,7 +771,7 @@ function registerIpc(): void {
       const message = error instanceof Error ? error.message : String(error);
       sendCallEvent({ kind: 'error', message });
       sendCallEvent({ kind: 'status', status: 'error' });
-      void logger?.write('error', 'chat-failed', { provider: cozeConfig.provider, message: message.slice(0, 500) });
+      void logger?.write('error', 'chat-failed', { message: message.slice(0, 500) });
     } finally {
       callAbort = undefined;
     }

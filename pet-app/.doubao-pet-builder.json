@@ -5,7 +5,7 @@
   "criticalFileHashes": {
     "forge.config.js": "d5c8432b8dbe5d263683e892c2d929b37b1d7fd80b6bb36392b04054e0b9d563",
     "webpack.renderer.config.js": "f0cbfe9f4f805126d0dd854b4024df83b2d08c2d67145ecae6bc29e5268ddda1",
-    "src/main.ts": "eeba49f3ffec234d67379f665f23491b878f7107d4b859171177847375fed891",
+    "src/main.ts": "d54cc9e1f019435b4215bf24c21ee20167432de91a22efa4e028205ed2611738",
     "src/preload.ts": "720a6aae57e93cbaff91291c8a25eefa0e83037039816aaba0beed2d3115c0e9",
     "src/main/data-validation.ts": "b718a4e4648109c5c1f6d054221e5d7f010bf40bf68f98adfbafdd58d3a0baa8",
     "src/renderer/pet/state-machine.ts": "c361129351654bce7fb593152e0ff936df8aa5e9f1f2e06ce9fc7a1beffa49d3",
@@ -22,7 +22,7 @@
     "tools/inspect-assets.mjs": "2b70044609d3868913ec0db7ba69470078d843fcfa5e7b7a9cabfbbc9e67f5a5",
     "package.json": "2b90745156344892450e6d427eec3d409544da8b505b75e50ef6f72d606b65c1",
     "package-lock.json": "9ab1155d405eceec01c39d18da5a3480aaf56341d9d08807f067e82978643d18",
-    "src/shared/contracts.ts": "c6a139218ce17b2e9e518064bc69618dbaad9bcd5e304c354da2dd7e460947e7",
+    "src/shared/contracts.ts": "9da14dda105acbf62d233a21cddabe82d90834c51043b18e279f254a67e70c0a",
     "src/renderer/pet/index.ts": "707a590cefd9a6d32b48e1f66d335d3361182848a2c214e36893f308ca2fcf05",
     "tests/e2e/app.e2e.ts": "549b49b032dc04bec78267f5dd8e4d31fd73bd0b5d2ad424fa9bdb0f11789ff4",
     "tools/semantic-cutout.mjs": "cd658297b1ab3b23f4532221e795ee806b6238eedf54e9f940fa0c11efca9ee0",

@@ -408,29 +408,6 @@ body {
   border-color: var(--primary, #ff8a24);
 }
 
-.provider-switch {
-  display: flex;
-  gap: 8px;
-}
-
-.provider-btn {
-  flex: 1;
-  padding: 8px 12px;
-  border: 1px solid var(--accent, #ffc987);
-  border-radius: 10px;
-  background: var(--surface, #ffffff);
-  color: var(--muted, #9a7b6a);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.provider-btn.active {
-  background: var(--primary, #ff8a24);
-  border-color: var(--primary, #ff8a24);
-  color: white;
-}
 
 .provider-block {
   display: flex;

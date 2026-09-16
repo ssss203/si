@@ -164,10 +164,6 @@ export interface TypingStatus {
 }
 
 export interface ChatConfig {
-  provider: 'coze' | 'deepseek';
-  apiToken: string;
-  botId: string;
-  userId: string;
   ttsEnabled: boolean;
   deepseekApiKey: string;
   deepseekModel: string;

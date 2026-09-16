@@ -25,12 +25,6 @@ const settingsToggle = document.getElementById('settings-toggle') as HTMLButtonE
 const closeBtn = document.getElementById('close-btn') as HTMLButtonElement;
 const newChatBtn = document.getElementById('new-chat-btn') as HTMLButtonElement;
 const sizeSwitch = document.getElementById('size-switch') as HTMLDivElement;
-const providerDeepseekBtn = document.getElementById('provider-deepseek') as HTMLButtonElement;
-const providerCozeBtn = document.getElementById('provider-coze') as HTMLButtonElement;
-const blockDeepseek = document.getElementById('block-deepseek') as HTMLDivElement;
-const blockCoze = document.getElementById('block-coze') as HTMLDivElement;
-const tokenInput = document.getElementById('coze-token') as HTMLInputElement;
-const botInput = document.getElementById('coze-bot') as HTMLInputElement;
 const dsKeyInput = document.getElementById('ds-key') as HTMLInputElement;
 const dsModelSelect = document.getElementById('ds-model') as HTMLSelectElement;
 const ttsToggle = document.getElementById('toggle-tts') as HTMLDivElement;
@@ -39,10 +33,6 @@ const saveConfigBtn = document.getElementById('save-config') as HTMLButtonElemen
 const saveHint = document.getElementById('save-hint') as HTMLSpanElement;
 
 let config: ChatConfig = {
-  provider: 'deepseek',
-  apiToken: '',
-  botId: '',
-  userId: '',
   deepseekApiKey: '',
   deepseekModel: 'deepseek-chat',
   ttsEnabled: true,
@@ -88,24 +78,14 @@ function speak(text: string): void {
   }
 }
 
-function applyProviderUI(): void {
-  const isDeepseek = config.provider === 'deepseek';
-  providerDeepseekBtn.classList.toggle('active', isDeepseek);
-  providerCozeBtn.classList.toggle('active', !isDeepseek);
-  blockDeepseek.hidden = !isDeepseek;
-  blockCoze.hidden = isDeepseek;
-}
 
 async function loadConfig(): Promise<void> {
   try {
     config = await window.petAPI?.call.getConfig() ?? config;
-    tokenInput.value = config.apiToken;
-    botInput.value = config.botId;
     dsKeyInput.value = config.deepseekApiKey;
     dsModelSelect.value = config.deepseekModel;
     ttsToggle.classList.toggle('active', config.ttsEnabled);
     aiBubbleToggle.classList.toggle('active', config.aiBubbles);
-    applyProviderUI();
   } catch (error) {
     console.error('Failed to load call config:', error);
   }
@@ -114,9 +94,6 @@ async function loadConfig(): Promise<void> {
 async function saveConfig(): Promise<void> {
   try {
     config = await window.petAPI?.call.saveConfig({
-      provider: config.provider,
-      apiToken: tokenInput.value.trim(),
-      botId: botInput.value.trim(),
       deepseekApiKey: dsKeyInput.value.trim(),
       deepseekModel: dsModelSelect.value,
       ttsEnabled: config.ttsEnabled,
@@ -236,14 +213,7 @@ aiBubbleToggle.addEventListener('click', () => {
   config.aiBubbles = !config.aiBubbles;
   aiBubbleToggle.classList.toggle('active', config.aiBubbles);
 });
-providerDeepseekBtn.addEventListener('click', () => {
-  config.provider = 'deepseek';
-  applyProviderUI();
-});
-providerCozeBtn.addEventListener('click', () => {
-  config.provider = 'coze';
-  applyProviderUI();
-});
+
 saveConfigBtn.addEventListener('click', () => void saveConfig());
 
 async function init(): Promise<void> {
