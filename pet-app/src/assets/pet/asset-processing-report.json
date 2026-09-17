@@ -1,6 +1,6 @@
 {
   "schemaVersion": 5,
-  "scope": "blink",
+  "scope": "happy",
   "backgroundMode": "semantic-cutout",
   "segmentationBackend": "auto",
   "subjectKind": "illustration",
@@ -12,8 +12,8 @@
   "assets": [
     {
       "ok": true,
-      "name": "blink/blink-01.png",
-      "state": "blink",
+      "name": "happy/happy-01.png",
+      "state": "happy",
       "cutoutBackend": "existing-alpha",
       "cutoutCached": false,
       "cutoutAttempts": [],
@@ -21,39 +21,39 @@
       "backgroundPalette": [],
       "borderCoverage": 1,
       "sourceSize": [
-        550,
-        550
+        597,
+        597
       ],
-      "foregroundRatio": 0.35675702479338844,
+      "foregroundRatio": 0.39770881206703534,
       "backgroundLikeForegroundRatio": 0,
-      "rectangularFill": 0.6015551839464883,
+      "rectangularFill": 0.5716480751082827,
       "sourceBounds": [
-        83,
-        49,
-        472,
-        508
+        89,
+        16,
+        530,
+        576
       ],
-      "sharedScale": 0.8617710583153347,
-      "normalizationCorrection": 1,
+      "sharedScale": 0.7099644128113879,
+      "normalizationCorrection": 0.8866927958439614,
       "referenceVisibleSize": [
-        336,
-        396
+        267,
+        368
       ],
       "groupSourceMaximum": [
-        391,
-        463
+        455,
+        562
       ],
       "outputBounds": [
-        88,
-        89,
-        423,
+        117,
+        132,
+        394,
         484
       ]
     },
     {
       "ok": true,
-      "name": "blink/blink-02.png",
-      "state": "blink",
+      "name": "happy/happy-02.png",
+      "state": "happy",
       "cutoutBackend": "existing-alpha",
       "cutoutCached": false,
       "cutoutAttempts": [],
@@ -61,39 +61,39 @@
       "backgroundPalette": [],
       "borderCoverage": 1,
       "sourceSize": [
-        551,
-        551
+        588,
+        588
       ],
-      "foregroundRatio": 0.34924127390884746,
+      "foregroundRatio": 0.4370487991114813,
       "backgroundLikeForegroundRatio": 0,
-      "rectangularFill": 0.5971502590673575,
+      "rectangularFill": 0.5909311329240154,
       "sourceBounds": [
-        90,
-        50,
-        475,
-        509
+        92,
+        7,
+        546,
+        568
       ],
-      "sharedScale": 0.8617710583153347,
-      "normalizationCorrection": 1,
+      "sharedScale": 0.7099644128113879,
+      "normalizationCorrection": 0.8731559765790652,
       "referenceVisibleSize": [
-        336,
-        396
+        267,
+        368
       ],
       "groupSourceMaximum": [
-        391,
-        463
+        455,
+        562
       ],
       "outputBounds": [
-        90,
-        89,
-        422,
+        115,
+        137,
+        396,
         484
       ]
     },
     {
       "ok": true,
-      "name": "blink/blink-03.png",
-      "state": "blink",
+      "name": "happy/happy-03.png",
+      "state": "happy",
       "cutoutBackend": "existing-alpha",
       "cutoutCached": false,
       "cutoutAttempts": [],
@@ -101,39 +101,39 @@
       "backgroundPalette": [],
       "borderCoverage": 1,
       "sourceSize": [
-        549,
-        549
+        516,
+        516
       ],
-      "foregroundRatio": 0.35752701550426175,
+      "foregroundRatio": 0.4196525148729043,
       "backgroundLikeForegroundRatio": 0,
-      "rectangularFill": 0.6004323866517337,
+      "rectangularFill": 0.583091976516634,
       "sourceBounds": [
-        81,
-        49,
-        471,
-        507
+        24,
+        4,
+        398,
+        514
       ],
-      "sharedScale": 0.8617710583153347,
-      "normalizationCorrection": 1,
+      "sharedScale": 0.7099644128113879,
+      "normalizationCorrection": 1.0087543236724537,
       "referenceVisibleSize": [
-        336,
-        396
+        267,
+        368
       ],
       "groupSourceMaximum": [
-        391,
-        463
+        455,
+        562
       ],
       "outputBounds": [
-        88,
-        89,
-        424,
+        122,
+        119,
+        389,
         484
       ]
     },
     {
       "ok": true,
-      "name": "blink/blink-04.png",
-      "state": "blink",
+      "name": "happy/happy-04.png",
+      "state": "happy",
       "cutoutBackend": "existing-alpha",
       "cutoutCached": false,
       "cutoutAttempts": [],
@@ -141,39 +141,39 @@
       "backgroundPalette": [],
       "borderCoverage": 1,
       "sourceSize": [
-        548,
-        548
+        574,
+        574
       ],
-      "foregroundRatio": 0.35989530608982895,
+      "foregroundRatio": 0.3471724799378407,
       "backgroundLikeForegroundRatio": 0,
-      "rectangularFill": 0.6022098523979071,
+      "rectangularFill": 0.5872884662778279,
       "sourceBounds": [
-        80,
-        48,
-        470,
-        506
+        120,
+        35,
+        495,
+        552
       ],
-      "sharedScale": 0.8617710583153347,
+      "sharedScale": 0.7099644128113879,
       "normalizationCorrection": 1,
       "referenceVisibleSize": [
-        336,
-        396
+        267,
+        368
       ],
       "groupSourceMaximum": [
-        391,
-        463
+        455,
+        562
       ],
       "outputBounds": [
-        88,
-        89,
-        424,
+        123,
+        117,
+        389,
         484
       ]
     },
     {
       "ok": true,
-      "name": "blink/blink-05.png",
-      "state": "blink",
+      "name": "happy/happy-05.png",
+      "state": "happy",
       "cutoutBackend": "existing-alpha",
       "cutoutCached": false,
       "cutoutAttempts": [],
@@ -181,32 +181,32 @@
       "backgroundPalette": [],
       "borderCoverage": 1,
       "sourceSize": [
-        548,
-        548
+        523,
+        523
       ],
-      "foregroundRatio": 0.35465062070435294,
+      "foregroundRatio": 0.39175736393581667,
       "backgroundLikeForegroundRatio": 0,
-      "rectangularFill": 0.5943877978133842,
+      "rectangularFill": 0.5685686694823524,
       "sourceBounds": [
-        87,
-        44,
-        473,
-        506
+        135,
+        14,
+        505,
+        521
       ],
-      "sharedScale": 0.8617710583153347,
-      "normalizationCorrection": 0.9924812030075187,
+      "sharedScale": 0.7099644128113879,
+      "normalizationCorrection": 1.0172977051891527,
       "referenceVisibleSize": [
-        336,
-        396
+        267,
+        368
       ],
       "groupSourceMaximum": [
-        391,
-        463
+        455,
+        562
       ],
       "outputBounds": [
-        91,
-        89,
-        421,
+        122,
+        118,
+        389,
         484
       ]
     }
