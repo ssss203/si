@@ -160,7 +160,8 @@
         "idle/idle-01.png",
         "idle/idle-02.png",
         "idle/idle-03.png",
-        "idle/idle-04.png"
+        "idle/idle-04.png",
+        "idle/idle-05.png"
       ],
       "frameDurationMs": 350,
       "loop": true,
@@ -186,7 +187,7 @@
         "blink/blink-04.png",
         "blink/blink-05.png"
       ],
-      "frameDurationMs": 75,
+      "frameDurationMs": 200,
       "loop": false,
       "priority": 30,
       "interrupt": "restart",
@@ -210,7 +211,7 @@
         "happy/happy-04.png",
         "happy/happy-05.png"
       ],
-      "frameDurationMs": 200,
+      "frameDurationMs": 300,
       "loop": false,
       "priority": 70,
       "interrupt": "restart",
@@ -258,7 +259,7 @@
         "peek/peek-04.png",
         "peek/peek-05.png"
       ],
-      "frameDurationMs": 120,
+      "frameDurationMs": 300,
       "loop": false,
       "priority": 55,
       "interrupt": "resume",
