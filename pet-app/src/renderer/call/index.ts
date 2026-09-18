@@ -41,6 +41,82 @@ let config: ChatConfig = {
 let busy = false;
 let currentReply = '';
 
+// ===== 聊天记录持久化：数组=真值，localStorage=镜像，DOM=投影 =====
+type ChatRole = 'user' | 'assistant' | 'thinking' | 'error';
+type ChatMessage = { role: ChatRole; text: string };
+const HISTORY_KEY = 'si-chat-history';
+const MAX_HISTORY = 100;
+
+let messages: ChatMessage[] = [];   // 内存真值
+
+function loadHistory(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// ① 唯一写入口：数组 → localStorage
+function persist(): void {
+  if (messages.length > MAX_HISTORY) messages = messages.slice(-MAX_HISTORY);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(messages));
+}
+
+// ② 唯一渲染：数组 → DOM
+function render(): void {
+  messagesEl.replaceChildren();
+  if (messages.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-hint';
+    empty.textContent = '和肆说点什么吧';
+    messagesEl.appendChild(empty);
+  } else {
+    for (const m of messages) {
+      const el = document.createElement('div');
+      el.className = `msg ${m.role}`;
+      el.textContent = m.text;
+      messagesEl.appendChild(el);
+    }
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// ③ 追加完整消息（用户消息）
+function pushMessage(role: ChatRole, text: string): void {
+  if (role === 'error') return;   // 错误不存
+  messages.push({ role, text });
+  persist();
+  render();
+}
+
+// ④ 流式更新最后一条 AI 回复（只改最后一条，不会新增）
+function updateLastMessage(text: string): void {
+  const last = messages[messages.length - 1];
+  if (last && last.role === 'assistant') {
+    last.text = text;
+  } else {
+    messages.push({ role: 'assistant', text });
+  }
+  persist();
+  // 流式高频更新：只改最后一条 DOM 文本，避免整表重建闪烁
+  const lastEl = messagesEl.lastElementChild;
+  if (lastEl && lastEl.classList.contains('assistant')) {
+    lastEl.textContent = text;
+  } else {
+    render();
+  }
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// ⑤ 清空
+function clearChat(): void {
+  messages = [];
+  localStorage.removeItem(HISTORY_KEY);
+  render();
+}
+
 function setStatus(status: 'idle' | 'thinking' | 'speaking' | 'error'): void {
   statusDot.className = `status-dot ${status}`;
   const labels: Record<string, string> = {
@@ -52,6 +128,7 @@ function setStatus(status: 'idle' | 'thinking' | 'speaking' | 'error'): void {
   statusText.textContent = labels[status] ?? '通话';
 }
 
+// 仅用于错误提示（不持久化）；正常消息一律走 pushMessage / updateLastMessage
 function addMessage(role: 'user' | 'assistant' | 'error' | 'thinking', text: string): void {
   const empty = messagesEl.querySelector('.empty-hint');
   if (empty) empty.remove();
@@ -114,7 +191,7 @@ async function sendMessage(): Promise<void> {
   busy = true;
   inputEl.value = '';
   sendBtn.disabled = true;
-  addMessage('user', text);
+  pushMessage('user', text);
   currentReply = '';
   setStatus('thinking');
   try {
@@ -133,18 +210,9 @@ window.petAPI?.call.onEvent((event: CallEvent) => {
     setStatus(event.status);
   } else if (event.kind === 'delta') {
     currentReply += event.text;
-    const last = messagesEl.lastElementChild;
-    if (last && last.classList.contains('assistant')) {
-      last.textContent = currentReply;
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-    } else {
-      addMessage('assistant', currentReply);
-    }
+    updateLastMessage(currentReply);
   } else if (event.kind === 'reply') {
-    const last = messagesEl.lastElementChild;
-    if (!last || !last.classList.contains('assistant')) {
-      addMessage('assistant', event.text);
-    }
+    updateLastMessage(event.text);
     if (event.text) speak(event.text);
     busy = false;
     sendBtn.disabled = false;
@@ -177,11 +245,7 @@ newChatBtn.addEventListener('click', async () => {
   }
   try {
     await window.petAPI?.call.clear();
-    messagesEl.replaceChildren();
-    const empty = document.createElement('div');
-    empty.className = 'empty-hint';
-    empty.textContent = '和肆说点什么吧';
-    messagesEl.appendChild(empty);
+    clearChat();
     currentReply = '';
     setStatus('idle');
     inputEl.focus();
@@ -218,6 +282,8 @@ saveConfigBtn.addEventListener('click', () => void saveConfig());
 
 async function init(): Promise<void> {
   await loadConfig();
+  messages = loadHistory();
+  render();
   setStatus('idle');
 }
 

@@ -107,7 +107,7 @@ async function firstWindowsPython() {
 async function temporaryWindowsRembg() {
   temporaryRembgPromise ??= (async () => {
     const candidate = await firstWindowsPython();
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'doubao-pet-rembg-'));
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pet-rembg-'));
     const venv = path.join(directory, 'venv');
     const python = path.join(venv, 'Scripts', 'python.exe');
     const rembg = path.join(venv, 'Scripts', 'rembg.exe');

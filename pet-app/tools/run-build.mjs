@@ -25,8 +25,8 @@ const projectKey = createHash('sha256').update(root).digest('hex').slice(0, 12);
 const asciiWindowsBase = [process.env.LOCALAPPDATA, process.env.TEMP, path.parse(root).root]
   .find((value) => value && /^[\x00-\x7F]+$/.test(value));
 const externalBuildBase = process.platform === 'win32'
-  ? path.join(asciiWindowsBase || path.parse(root).root, 'DoubaoPetBuilder', projectKey)
-  : path.join(path.dirname(root), '.doubao-pet-build-temp', projectKey);
+  ? path.join(asciiWindowsBase || path.parse(root).root, 'PetBuilder', projectKey)
+  : path.join(path.dirname(root), '.pet-build-temp', projectKey);
 const tempDir = path.join(externalBuildBase, 'temp');
 const outDir = path.join(externalBuildBase, 'out');
 const statusFile = path.join(buildDir, 'status.json');

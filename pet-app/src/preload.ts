@@ -1,3 +1,4 @@
+// hash-sync 练习：改锁内文件必须同步哈希
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { CallEvent, ChatConfig, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, StateActivity, TypingStatus } from './shared/contracts';
 

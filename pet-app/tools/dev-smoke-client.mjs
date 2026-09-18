@@ -88,7 +88,7 @@ await evaluate(dashboard, `window.petAPI.settings.update({edgeSnap:${JSON.string
 
 const testReminder = await evaluate(
   reminder,
-  'window.petAPI.reminders.save({text:"Doubao dev smoke",dueAt:new Date(Date.now()+300000).toISOString()})',
+  'window.petAPI.reminders.save({text:"dev smoke",dueAt:new Date(Date.now()+300000).toISOString()})',
 );
 const reminders = await evaluate(dashboard, 'window.petAPI.reminders.list()');
 if (!reminders.some((item) => item.id === testReminder.id)) throw new Error('Reminder was not persisted.');

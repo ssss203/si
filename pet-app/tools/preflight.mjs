@@ -5,7 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 const root = process.cwd();
-const provenancePath = path.join(root, '.doubao-pet-builder.json');
+const provenancePath = path.join(root, '.pet-builder.json');
 const required = [
   'node_modules/@electron-forge/cli/dist/electron-forge.js',
   'node_modules/electron/package.json',
@@ -64,7 +64,7 @@ let provenance;
 try {
   provenance = JSON.parse(await readFile(provenancePath, 'utf8'));
 } catch {
-  console.error('Development preflight failed: .doubao-pet-builder.json is missing or invalid. Create the project with scripts/scaffold_project.py.');
+  console.error('Development preflight failed: .pet-builder.json is missing or invalid. Create the project with scripts/scaffold_project.py.');
   process.exit(1);
 }
 if (provenance.templateContractVersion !== 5 || provenance.specSchemaVersion !== 5) {

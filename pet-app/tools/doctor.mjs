@@ -23,7 +23,7 @@ record('node-version', nodeMajor < 25 || Boolean(process.env.PET_BUILD_NODE), {
 
 let provenance;
 try {
-  provenance = JSON.parse(await readFile(path.join(root, '.doubao-pet-builder.json'), 'utf8'));
+  provenance = JSON.parse(await readFile(path.join(root, '.pet-builder.json'), 'utf8'));
   record('builder-provenance', provenance.templateContractVersion === 5, {
     templateContractVersion: provenance.templateContractVersion,
     repair: provenance.templateContractVersion === 5
