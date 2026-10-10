@@ -14,9 +14,11 @@
  *   npx tsx tools/probe-checkpoint.ts
  */
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { promisify } from 'node:util';
 import { piChatStream, resetPiChatSession, describeWorkspace } from '../src/main/pi-engine';
 import {
   isProtectedPath,
@@ -24,10 +26,17 @@ import {
   restoreLatestCheckpoint,
 } from '../src/main/pi-checkpoint';
 
+const execFileAsync = promisify(execFile);
+
 const TARGET = 'qa/manual-checklist.md';
 
 async function sha256(file: string): Promise<string> {
   return createHash('sha256').update(await readFile(file)).digest('hex');
+}
+
+async function gitStatus(cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd, windowsHide: true });
+  return stdout.trim();
 }
 
 async function loadPetConfig(): Promise<{ apiKey: string; model: string }> {
@@ -98,9 +107,14 @@ async function main(): Promise<void> {
   console.log(`\n--- 测试 3：撤回 ---`);
   const restored = await restoreLatestCheckpoint(cwd);
   console.log(`撤回目标: ${restored ? restored.ref.slice(0, 10) : '（无记录）'}`);
+  // 注意：不能用字节级 sha256 判断是否还原 —— git reset --hard 会按 core.autocrlf
+  // 规则重新落盘，换行符（CRLF/LF）可能变化，字节不同但 git 认为内容一致。
+  // 真正的语义判断是 git 自己怎么看：工作区应该是干净的。
+  const status = await gitStatus(cwd);
+  console.log(`撤回后 git status: ${status.length === 0 ? '（空 = 干净）' : status}`);
+  console.log(status.length === 0 ? '✅ 工作区已回到存档那一刻' : '❌ 工作区还有差异（需要人工看一眼）');
   const reverted = await sha256(path.join(cwd, TARGET));
-  console.log(`撤回后 sha256: ${reverted.slice(0, 16)}...`);
-  console.log(reverted === before ? '✅ 文件已还原到改前状态' : '❌ 文件没还原（需要人工看一眼）');
+  console.log(`参考：改前 ${before.slice(0, 16)} / 撤回后 ${reverted.slice(0, 16)}（换行符差异属正常）`);
 
   await resetPiChatSession();
   console.log('\n=== 探针结束 ===');
