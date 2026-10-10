@@ -56,12 +56,17 @@ function playSquash(): void {
 }
 
 // 显示反馈气泡
+let feedbackTimer: number | undefined;
 function showFeedback(text: string): void {
   feedbackBubble.textContent = text;
   feedbackBubble.classList.add('show');
-  setTimeout(() => {
+  if (feedbackTimer !== undefined) clearTimeout(feedbackTimer);
+  // 显示时长跟着字数走：基础 2 秒 + 每字 130ms，上限 12 秒
+  // （主进程 main.ts 的 bubbleDurationMs 用同一公式，用来决定何时把窗口收回去）
+  const duration = Math.min(12_000, 2_000 + text.length * 130);
+  feedbackTimer = window.setTimeout(() => {
     feedbackBubble.classList.remove('show');
-  }, 2000);
+  }, duration);
 }
 
 // 切换状态

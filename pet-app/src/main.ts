@@ -296,6 +296,10 @@ function secureWindow(options: Electron.BrowserWindowConstructorOptions, role: R
 function petSize(): number { return Math.round(spec.experience.petSizing.baseWindowPx * settings.petScale); }
 
 function applyPetSettings(): void {
+  // 尺寸要重算了：先取消"气泡加高"状态，免得两边打架
+  if (petExpandTimer) clearTimeout(petExpandTimer);
+  petExpandTimer = undefined;
+  petExpandedBy = undefined;
   if (!petWindow || petWindow.isDestroyed()) return;
   const size = petSize();
   void logger?.write('info', 'apply-pet-settings', { scale: settings.petScale, size, before: petWindow.getSize() });
@@ -418,7 +422,48 @@ function broadcastStats(): void {
   }
 }
 
+/** 气泡显示时长（必须和渲染层 renderer/pet/index.ts 里的公式保持一致） */
+function bubbleDurationMs(textLength: number): number {
+  return Math.min(12_000, 2_000 + textLength * 130);
+}
+
+/** 当前为了放长气泡把桌宠窗口临时加高了多少（undefined = 没加高） */
+let petExpandedBy: number | undefined;
+let petExpandTimer: NodeJS.Timeout | undefined;
+
+/**
+ * 气泡文字长时，把桌宠窗口临时"向上长高"：底边不动（桌宠站在原地），
+ * 新增的空间留给气泡 —— 这样字号不用缩小（保持 14px 好读），也不会压住桌宠。
+ */
+function expandPetForBubble(textLength: number): void {
+  if (!petWindow || petWindow.isDestroyed()) return;
+  const extra = textLength <= 18 ? 0 : Math.min(130, 24 + Math.round(textLength * 1.6));
+  if (extra === 0) return;
+
+  const base = petSize();
+  if (petExpandedBy === undefined) {
+    const current = petWindow.getBounds();
+    petWindow.setBounds({ x: current.x, y: current.y - extra, width: current.width, height: base + extra }, true);
+    petExpandedBy = extra;
+  }
+
+  if (petExpandTimer) clearTimeout(petExpandTimer);
+  petExpandTimer = setTimeout(() => {
+    const extraPx = petExpandedBy ?? 0;
+    petExpandedBy = undefined;
+    petExpandTimer = undefined;
+    if (!petWindow || petWindow.isDestroyed()) return;
+    const current = petWindow.getBounds();
+    // 收起时保持底边位置（中途被拖走也不会跳）
+    petWindow.setBounds({ x: current.x, y: current.y + extraPx, width: current.width, height: base }, true);
+  }, bubbleDurationMs(textLength) + 400);
+}
+
 function sendActivity(activity: StateActivity): void {
+  // 反馈气泡：文字多就临时加高窗口 —— 不缩字号、也不压住桌宠
+  if (typeof activity.feedback === 'string' && activity.feedback.length > 18) {
+    expandPetForBubble(activity.feedback.length);
+  }
   if (petWindow && !petWindow.isDestroyed()) petWindow.webContents.send('state:activity', activity);
 }
 
@@ -808,6 +853,33 @@ function registerIpc(): void {
         text: trimmed,
         history: chatHistory,
         onDelta: (delta) => sendCallEvent({ kind: 'delta', text: delta }),
+        // 阶段 G：肆自己动的动作请求（播放动画 / 主动说话 / 安排提醒）
+        // 渲染层只看 stateId（切动画）和 feedback（弹气泡），kind 只是标签。
+        onEvent: (engineEvent) => {
+          if (engineEvent.type !== 'action') return;
+          if (engineEvent.action === 'play_animation' && typeof engineEvent.stateId === 'string') {
+            if (spec.states.some((state) => state.id === engineEvent.stateId)) {
+              sendActivity({ kind: 'state', stateId: engineEvent.stateId, durationMs: 2500 });
+            }
+            return;
+          }
+          if (engineEvent.action === 'say' && typeof engineEvent.text === 'string') {
+            sendActivity({ kind: 'interaction', feedback: engineEvent.text.slice(0, 200) });
+            return;
+          }
+          if (engineEvent.action === 'remind'
+            && typeof engineEvent.text === 'string'
+            && typeof engineEvent.dueAt === 'string') {
+            const reminder: Reminder = {
+              id: randomUUID(),
+              text: engineEvent.text.slice(0, 200).trim(),
+              dueAt: new Date(engineEvent.dueAt).toISOString(),
+              createdAt: new Date().toISOString(),
+            };
+            reminders.push(reminder);
+            void persistReminders().then(() => scheduleReminder(reminder)).catch(() => { });
+          }
+        },
         signal: callAbort.signal,
       });
       replyText = reply.text;

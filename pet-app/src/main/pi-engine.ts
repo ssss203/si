@@ -38,6 +38,7 @@ import { existsSync } from 'node:fs';
 import type { ChatTurn } from '../shared/contracts';
 import { createCheckpointExtension } from './pi-checkpoint';
 import { createProjectToolsExtension } from './pi-tools';
+import { createActionsExtension } from './pi-actions';
 
 /** Pi SDK 的类型（type-only import 会被编译期擦除，不会在运行时加载） */
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -74,8 +75,8 @@ const MODEL_MAP: Readonly<Record<string, string>> = {
 const TOOL_TIERS = {
   // 注意：自定义工具（run_checks / git_status）也必须列进来，
   // 否则会被 tools 白名单过滤掉 —— 白名单管的是"所有工具"，不区分内置还是自定义。
-  readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status'],
-  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status'],
+  readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status', 'play_animation', 'say', 'remind'],
+  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status', 'play_animation', 'say', 'remind'],
 } as const;
 
 /**
@@ -130,10 +131,21 @@ function projectRoot(): Workspace {
   return { dir: petRoot(), allowTools: false };
 }
 
+/** 引擎事件：工具调用 + 桌宠动作请求（阶段 G） */
+export interface EngineEvent {
+  type: string;
+  toolName?: string;
+  /** 动作类事件（type === 'action'）时才有 */
+  action?: string;
+  stateId?: string;
+  text?: string;
+  dueAt?: string;
+}
+
 /** 一轮对话要把事件送去哪里 */
 interface RunSink {
   onDelta: (delta: string) => void;
-  onEvent?: (event: { type: string; toolName?: string }) => void;
+  onEvent?: (event: EngineEvent) => void;
 }
 
 export interface PiChatStreamOptions {
@@ -144,8 +156,8 @@ export interface PiChatStreamOptions {
   /** 保留参数：pi 自己维护上下文，这里不再重放历史 */
   history: ChatTurn[];
   onDelta: (delta: string) => void;
-  /** 可选：工具调用等事件（UI 可以显示"正在读文件…"），不传也不影响 */
-  onEvent?: (event: { type: string; toolName?: string }) => void;
+  /** 可选：工具调用与动作请求事件（UI 可以显示"正在读文件…"、执行桌宠动作），不传也不影响 */
+  onEvent?: (event: EngineEvent) => void;
   signal?: AbortSignal;
 }
 
@@ -226,7 +238,10 @@ let chatSession: ChatSession | undefined;
 
 /** "肆的记忆"存哪儿：桌宠自己的目录，看得见也删得掉 */
 function sessionDir(): string {
-  return path.join(petRoot(), 'pi-sessions');
+  // 探针/测试可以用 PET_PI_SESSION_DIR 指到临时目录，
+  // 免得测试对话被写进桌宠的真实记忆里（实测会发现肆"记得"测试内容）。
+  const override = (process.env.PET_PI_SESSION_DIR ?? '').trim();
+  return override.length > 0 ? override : path.join(petRoot(), 'pi-sessions');
 }
 
 /** 下一次建会话时是否强制开一个新的（被中止过 / 用户点了"清空对话"） */
@@ -277,11 +292,27 @@ async function getChatSession(
     systemPromptOverride: () => systemPrompt,
     // 必须给，否则 pi 会追加它自己的 APPEND_SYSTEM.md
     appendSystemPromptOverride: () => [],
+    // ── 安全加固（回答"pi 生态里扩展绕过设置"那个问题）────────────────
+    // pi 默认会自动发现并加载磁盘上的扩展：
+    //   ~/.pi/agent/extensions/ 和 <cwd>/.pi/extensions/
+    // 那等于给了肆（或任何能往那些目录写文件的东西）一条绕开我们工具白名单的后门 ——
+    // 扩展跑在主进程里，能 hook 事件、能直接跑代码。
+    // 关掉自动发现后，只加载下面我们显式注册的 extensionFactories。
+    noExtensions: true,
+    // 技能 / 提示词模板：只从桌宠自己的目录读（将来 UI 里管理的就是这些文件）
+    additionalSkillPaths: [path.join(agentRoot, 'skills')],
+    additionalPromptTemplatePaths: [path.join(agentRoot, 'prompts')],
     // 扩展一：改动前自动存档 + 硬门拦截（阶段 E / F）
     // 扩展二：自定义工具 run_checks / git_status（阶段 F 的测试安全网 = 阶段 G 的机制）
     extensionFactories: [
       createCheckpointExtension({ cwd: workspace.dir }),
       createProjectToolsExtension({ cwd: workspace.dir }),
+      // 动作工具：它自己动起来（阶段 G）。emit 把动作请求送到"当前这一轮"的事件出口，
+      // 由 main.ts 去真正执行（播放动画 / 弹气泡 / 建提醒）。
+      createActionsExtension({
+        cwd: workspace.dir,
+        emit: (event) => chatSession?.sink?.onEvent?.(event),
+      }),
     ],
   });
   await loader.reload();

@@ -54,20 +54,28 @@ html, body {
 
 #feedback-bubble {
   position: absolute;
-  top: 10%;
+  /* 贴窗口最上沿：桌宠的脸在窗口下半部分，气泡从上往下长，尽量不压脸 */
+  top: 2%;
   left: 50%;
   transform: translateX(-50%);
-  background: white;
-  padding: 8px 16px;
-  border-radius: 16px;
-  font-size: 14px;
+  background: rgba(255, 255, 255, 0.94);
+  padding: 6px 12px;
+  border-radius: 14px;
+  font-size: 12px;
   color: #333;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
   opacity: 0;
   transition: opacity 0.3s ease, transform 0.3s ease;
   pointer-events: none;
-  white-space: nowrap;
+  /* 按窗口宽度换行 + 居中（原来 white-space: nowrap 会把长文字裁掉） */
+  max-width: 92%;
+  white-space: normal;
+  word-break: break-word;
+  text-align: center;
+  line-height: 1.4;
 }
+/* 注意：这里**不缩字号** —— 字小了不好读。
+   长文字靠主进程把桌宠窗口临时"长高"来腾地方（见 main.ts 的 expandPetForBubble）。 */
 
 #feedback-bubble.show {
   opacity: 1;
