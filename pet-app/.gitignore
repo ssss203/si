@@ -8,3 +8,14 @@ qa/*
 *.log
 .DS_Store
 Thumbs.db
+
+# secrets - never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+config.local.*
+*secret*
+*credential*
