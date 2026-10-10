@@ -37,6 +37,7 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import type { ChatTurn } from '../shared/contracts';
 import { createCheckpointExtension } from './pi-checkpoint';
+import { createProjectToolsExtension } from './pi-tools';
 
 /** Pi SDK 的类型（type-only import 会被编译期擦除，不会在运行时加载） */
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -71,8 +72,10 @@ const MODEL_MAP: Readonly<Record<string, string>> = {
  *   第 4 层：+ bash（改逻辑/跑测试）  ← 最后才开，且必须有命令白名单
  */
 const TOOL_TIERS = {
-  readOnly: ['read', 'grep', 'find', 'ls'],
-  readEdit: ['read', 'grep', 'find', 'ls', 'edit'],
+  // 注意：自定义工具（run_checks / git_status）也必须列进来，
+  // 否则会被 tools 白名单过滤掉 —— 白名单管的是"所有工具"，不区分内置还是自定义。
+  readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status'],
+  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status'],
 } as const;
 
 /**
@@ -82,11 +85,16 @@ const TOOL_TIERS = {
  */
 function activeTools(workspace: Workspace): string[] {
   if (!workspace.allowTools) return [];
-  const override = (process.env.PET_PI_TOOLS ?? '')
+  // 只读层（含 run_checks / git_status 两个自定义工具）永远是底座；
+  // 环境变量是在它之上"再额外放开"哪些工具。
+  // ⚠️ 不能拿环境变量直接替换整个列表：tools 是白名单，管的是所有工具（内置 + 自定义），
+  // 一替换就会把自定义工具一起过滤掉（实测：肆会诚实地说"我跑不了，没有执行工具"）。
+  const base: string[] = [...TOOL_TIERS.readOnly];
+  const extra = (process.env.PET_PI_TOOLS ?? '')
     .split(',')
     .map((name) => name.trim())
-    .filter((name) => name.length > 0);
-  return override.length > 0 ? override : [...TOOL_TIERS.readOnly];
+    .filter((name) => name.length > 0 && !base.includes(name));
+  return extra.length > 0 ? [...base, ...extra] : base;
 }
 
 /** 桌宠专属的引擎数据目录：%APPDATA%\肆\ */
@@ -269,8 +277,12 @@ async function getChatSession(
     systemPromptOverride: () => systemPrompt,
     // 必须给，否则 pi 会追加它自己的 APPEND_SYSTEM.md
     appendSystemPromptOverride: () => [],
-    // 改动前自动存档 + 受保护路径拦截（阶段 E / F 第一层）
-    extensionFactories: [createCheckpointExtension({ cwd: workspace.dir })],
+    // 扩展一：改动前自动存档 + 硬门拦截（阶段 E / F）
+    // 扩展二：自定义工具 run_checks / git_status（阶段 F 的测试安全网 = 阶段 G 的机制）
+    extensionFactories: [
+      createCheckpointExtension({ cwd: workspace.dir }),
+      createProjectToolsExtension({ cwd: workspace.dir }),
+    ],
   });
   await loader.reload();
 
