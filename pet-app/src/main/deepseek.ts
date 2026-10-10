@@ -1,143 +1,28 @@
-import type { ChatTurn } from '../shared/contracts';
-
-export interface DeepSeekReply {
-  text: string;
-}
-
-function parseDelta(line: string): string {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith('data:')) return '';
-  const payload = trimmed.slice(5).trim();
-  if (!payload || payload === '[DONE]') return '';
-  try {
-    const parsed = JSON.parse(payload);
-    const delta = parsed?.choices?.[0]?.delta;
-    if (delta && typeof delta.content === 'string') return delta.content;
-  } catch {
-    // 非 JSON 或解析失败，忽略该行
-  }
-  return '';
-}
-
 /**
- * Stream one message to DeepSeek (OpenAI-compatible chat completions).
- * Emits parsed text deltas through onDelta and resolves with the final reply.
+ * deepseek.ts —— 桌宠「说话引擎」的入口（开关文件）。
  *
- * Endpoint: POST https://api.deepseek.com/chat/completions (stream=true, SSE)
+ * 这个文件现在只有一行有效代码：把真正的实现 re-export 出去。
+ *
+ * 为什么这么设计：
+ *   main.ts 里那句 import 从头到尾没有变过 ——
+ *     import { deepseekChatStream, deepseekShortReply } from './main/deepseek';
+ *   而 src/main.ts 被 .pet-builder.json 的哈希锁保护着（改了它，npm run doctor
+ *   和打包前的 preflight 都会拦住构建）。把"换引擎"这件事收在这个不受保护的
+ *   文件里，受保护的模板文件就零漂移，构建也不会被打断。
+ *
+ * 两套实现随时可切：
+ *   ./pi-engine      Pi SDK 会话（新引擎，阶段 C 起默认）
+ *   ./deepseek-http  原来的 DeepSeek HTTP + SSE 直连（保底实现，完整保留）
+ *
+ * 回滚方法：把下面这块换成文件末尾注释里那一版，然后跑 npx tsc --noEmit && npm run check。
  */
-export async function deepseekChatStream({
-  apiKey,
-  model,
-  systemPrompt,
-  text,
-  history,
-  onDelta,
-  signal,
-}: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  text: string;
-  history: ChatTurn[];
-  onDelta: (delta: string) => void;
-  signal: AbortSignal;
-}): Promise<DeepSeekReply> {
-  if (!apiKey) throw new Error('DeepSeek 未配置：请先填写 API Key');
+export {
+  piChatStream as deepseekChatStream,
+  piShortReply as deepseekShortReply,
+} from './pi-engine';
 
-  const messages: Array<{ role: string; content: string }> = [
-    { role: 'system', content: systemPrompt },
-    ...history.map((turn) => ({ role: turn.role, content: turn.content })),
-    { role: 'user', content: text },
-  ];
+/* ---- 想切回原来的直连 HTTP 引擎，就把上面那块注释掉，放开下面这块 ----
 
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model, messages, stream: true }),
-    signal,
-  });
-  if (!response.ok || !response.body) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API ${response.status}: ${detail.slice(0, 300) || response.statusText}`);
-  }
+export { deepseekChatStream, deepseekShortReply } from './deepseek-http';
 
-  let accumulated = '';
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      const delta = parseDelta(line);
-      if (delta) {
-        accumulated += delta;
-        onDelta(delta);
-      }
-    }
-  }
-  for (const line of buffer.split('\n')) {
-    const delta = parseDelta(line);
-    if (delta) {
-      accumulated += delta;
-      onDelta(delta);
-    }
-  }
-
-  if (!accumulated) throw new Error('DeepSeek 没有返回任何内容（可能是 API Key 错误或额度问题）');
-  return { text: accumulated };
-}
-
-/**
- * 非流式短回复：用于互动气泡等需要"一句话"的场景。
- * 独立于对话历史，max_tokens 限制输出长度，控制 token 成本。
- */
-export async function deepseekShortReply({
-  apiKey,
-  model,
-  systemPrompt,
-  prompt,
-  signal,
-}: {
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  prompt: string;
-  signal: AbortSignal;
-}): Promise<string> {
-  if (!apiKey) throw new Error('DeepSeek 未配置：请先填写 API Key');
-  const response = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt },
-      ],
-      max_tokens: 80,
-      stream: false,
-    }),
-    signal,
-  });
-  if (!response.ok) {
-    const detail = await response.text().catch(() => '');
-    throw new Error(`DeepSeek API ${response.status}: ${detail.slice(0, 300) || response.statusText}`);
-  }
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const text = payload.choices?.[0]?.message?.content?.trim() ?? '';
-  if (!text) throw new Error('DeepSeek 没有返回内容');
-  return text.slice(0, 60);
-}
+---- */
