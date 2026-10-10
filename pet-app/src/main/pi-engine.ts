@@ -10,8 +10,9 @@
  *
  * 与 deepseek.ts 的关键差异（都是有意为之）：
  *
- *  1. 【常驻会话】pi 自己维护上下文，所以调用方传进来的 history 会被忽略。
- *     代价：App 重启后会话重置。
+ *  1. 【常驻会话 + 持久化】pi 自己维护上下文，所以调用方传进来的 history 会被忽略。
+ *     会话文件存在 %APPDATA%\肆\pi-sessions\ —— 重启不失忆；被中止或点了"清空对话"
+ *     时开一个新的会话文件（原因见下面"正确性边界"）。
  *
  *  2. 【模型名映射】桌宠配置里写的是 deepseek-chat / deepseek-reasoner，
  *     但 pi 的模型目录里只有 deepseek-flash / deepseek-v4-pro，这里做翻译。
@@ -212,10 +213,19 @@ interface ChatSession {
   session: Awaited<ReturnType<PiSdk['createAgentSession']>>['session'];
   /** 当前这一轮的事件出口；没有活动轮次时是 undefined（旧事件直接丢弃） */
   sink: RunSink | undefined;
-  /** 这一轮是否被中止过：脏了的会话下一次调用直接丢掉重开 */
-  dirty: boolean;
 }
 let chatSession: ChatSession | undefined;
+
+/** "肆的记忆"存哪儿：桌宠自己的目录，看得见也删得掉 */
+function sessionDir(): string {
+  return path.join(petRoot(), 'pi-sessions');
+}
+
+/** 下一次建会话时是否强制开一个新的（被中止过 / 用户点了"清空对话"） */
+let forceNewSession = false;
+
+/** 当前会话文件路径（探针/诊断用） */
+let chatSessionFile: string | undefined;
 
 async function disposeChatSession(): Promise<void> {
   if (!chatSession) return;
@@ -264,6 +274,14 @@ async function getChatSession(
   });
   await loader.reload();
 
+  // 会话持久化：默认接着最近一次会话（重启不失忆）；
+  // 被中止过 / 用户点了"清空对话" → 开一个全新的会话文件。
+  const startFresh = forceNewSession;
+  forceNewSession = false;
+  const sessionManager = startFresh
+    ? sdk.SessionManager.create(workspace.dir, sessionDir())
+    : sdk.SessionManager.continueRecent(workspace.dir, sessionDir());
+
   const { session } = await sdk.createAgentSession({
     cwd: workspace.dir,
     model,
@@ -271,10 +289,11 @@ async function getChatSession(
     resourceLoader: loader,
     // 权限分层：体检通过才给工具；不通过就退回"只能说话"
     tools: activeTools(workspace),
-    sessionManager: sdk.SessionManager.inMemory(workspace.dir),
+    sessionManager,
   });
+  chatSessionFile = session.sessionFile;
 
-  const record: ChatSession = { key, session, sink: undefined, dirty: false };
+  const record: ChatSession = { key, session, sink: undefined };
 
   // 订阅只建一次：事件按"当前这一轮"分发，没有活动轮次时直接丢弃。
   session.subscribe((rawEvent: unknown) => {
@@ -302,8 +321,8 @@ export async function piChatStream(options: PiChatStreamOptions): Promise<PiRepl
 
   if (!apiKey) throw new Error('DeepSeek 未配置：请先填写 API Key');
 
-  // 上一轮被中止过 → 这个会话的记忆是脏的，直接丢掉重开（见文件头说明）
-  if (chatSession?.dirty) await disposeChatSession();
+  // 上一轮被中止过（forceNewSession）→ 丢掉旧会话，下一次会开一个全新的会话文件
+  if (forceNewSession) await disposeChatSession();
 
   const modelId = MODEL_MAP[model] ?? 'deepseek-flash';
   const active = await getChatSession(apiKey, modelId, systemPrompt);
@@ -327,7 +346,7 @@ export async function piChatStream(options: PiChatStreamOptions): Promise<PiRepl
     // 先掐断事件出口，再收尾：后面来的残留事件就进不来了
     active.sink = undefined;
     removeAbortBridge();
-    if (signal?.aborted) active.dirty = true;
+    if (signal?.aborted) forceNewSession = true;
   }
 
   if (signal?.aborted) throw new Error('已中止这次回复');
@@ -396,7 +415,14 @@ export async function piShortReply(options: PiShortReplyOptions): Promise<string
  * 否则 pi 还会记得清空之前的上下文。
  */
 export async function resetPiChatSession(): Promise<void> {
+  // 不是删会话文件，而是"下一次开一个新的" —— 旧记忆留在磁盘上，你随时能翻
+  forceNewSession = true;
   await disposeChatSession();
+}
+
+/** 给探针/诊断用：当前会话文件在哪、"肆的记忆"存在哪个目录 */
+export function describeChatSession(): { sessionFile: string | undefined; sessionDir: string; forceNew: boolean } {
+  return { sessionFile: chatSessionFile, sessionDir: sessionDir(), forceNew: forceNewSession };
 }
 
 /** 给探针/诊断用：当前它会用哪个工作目录、开不开工具 */
