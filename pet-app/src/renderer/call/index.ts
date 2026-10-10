@@ -24,6 +24,7 @@ const configPanel = document.getElementById('config-panel') as HTMLDivElement;
 const settingsToggle = document.getElementById('settings-toggle') as HTMLButtonElement;
 const closeBtn = document.getElementById('close-btn') as HTMLButtonElement;
 const newChatBtn = document.getElementById('new-chat-btn') as HTMLButtonElement;
+const revertBtn = document.getElementById('revert-btn') as HTMLButtonElement;
 const sizeSwitch = document.getElementById('size-switch') as HTMLDivElement;
 const dsKeyInput = document.getElementById('ds-key') as HTMLInputElement;
 const dsModelSelect = document.getElementById('ds-model') as HTMLSelectElement;
@@ -237,6 +238,23 @@ settingsToggle.addEventListener('click', () => {
 });
 
 // 新建对话：清空上下文 + 清空界面消息
+// 撤回按钮：把肆最近的改动回滚到它动手之前的存档（git reset --hard）
+revertBtn.addEventListener('click', async () => {
+  revertBtn.disabled = true;
+  try {
+    const result = await window.petAPI?.engine.revert();
+    if (!result) {
+      addMessage('error', '撤回失败：主进程没有回应');
+      return;
+    }
+    addMessage(result.ok ? 'thinking' : 'error', `↩️ ${result.message}`);
+  } catch (error) {
+    addMessage('error', `撤回失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    revertBtn.disabled = false;
+  }
+});
+
 newChatBtn.addEventListener('click', async () => {
   if (busy) {
     await window.petAPI?.call.stop();

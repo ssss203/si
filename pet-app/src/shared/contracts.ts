@@ -181,6 +181,20 @@ export type CallEvent =
   | { kind: 'reply'; text: string; turn: ChatTurn }
   | { kind: 'error'; message: string };
 
+/** 引擎侧的存档记录（阶段 E）：agent 动手前的 git 快照 */
+export interface EngineCheckpoint {
+  ref: string;
+  at: string;
+  reason: string;
+}
+
+/** 撤回结果：ok=false 时 message 里写明原因（比如"还没有任何存档"） */
+export interface EngineRevertResult {
+  ok: boolean;
+  message: string;
+  checkpoint?: EngineCheckpoint;
+}
+
 export interface PetAPI {
   settings: {
     get: () => Promise<Settings>;
@@ -232,6 +246,12 @@ export interface PetAPI {
     clear: () => Promise<void>;
     resize: (width: number, height: number) => Promise<void>;
     onEvent: (listener: (event: CallEvent) => void) => () => void;
+  };
+  engine: {
+    /** 最近一次存档（agent 动手前的快照）；没有就是 null */
+    checkpoint: () => Promise<EngineCheckpoint | null>;
+    /** 撤回到最近一次存档：改坏了点一下就回去 */
+    revert: () => Promise<EngineRevertResult>;
   };
 }
 

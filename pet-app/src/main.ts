@@ -13,6 +13,10 @@ import { localDateKey, nextReminderDelay, parsePersistedStats, parseReminders, p
 import { readValidatedJson } from './main/persistence';
 
 import { deepseekChatStream, deepseekShortReply } from './main/deepseek';
+// 引擎侧工具：清空会话记忆 / 撤回 agent 改动。
+// 注意这两个不经过引擎开关（deepseek.ts）：即使切回 HTTP 引擎，按钮也照常工作。
+import { resetPiChatSession, describeWorkspace } from './main/pi-engine';
+import { readLatestCheckpoint, restoreLatestCheckpoint } from './main/pi-checkpoint';
 import trayIconPath from './assets/tray/tray-icon.png';
 
 const spec = specData as PetSpec;
@@ -828,10 +832,31 @@ function registerIpc(): void {
     callAbort = undefined;
     sendCallEvent({ kind: 'status', status: 'idle' });
   });
-  ipcMain.handle('call:clear', (event) => {
+  ipcMain.handle('call:clear', async (event) => {
     assertSender(event, ['call']);
     chatHistory = [];
+    // 接了 pi 之后，"清空对话"必须连引擎的会话记忆一起清，
+    // 否则它还记得清空之前聊过什么（会话是持久化的）。
+    await resetPiChatSession();
     sendCallEvent({ kind: 'status', status: 'idle' });
+  });
+  ipcMain.handle('engine:checkpoint', (event) => {
+    assertSender(event, ['call', 'dashboard']);
+    return readLatestCheckpoint(describeWorkspace().dir) ?? null;
+  });
+  ipcMain.handle('engine:revert', async (event) => {
+    assertSender(event, ['call', 'dashboard']);
+    try {
+      const record = await restoreLatestCheckpoint(describeWorkspace().dir);
+      if (!record) return { ok: false, message: '还没有任何存档可以撤回（它还没改过文件）' };
+      return {
+        ok: true,
+        message: `已撤回：回到 ${new Date(record.at).toLocaleString()} 的存档（${record.reason}）`,
+        checkpoint: { ref: record.ref, at: record.at, reason: record.reason },
+      };
+    } catch (error) {
+      return { ok: false, message: `撤回失败：${error instanceof Error ? error.message : String(error)}` };
+    }
   });
   ipcMain.handle('call:resize', (event, payload: unknown) => {
     assertSender(event, ['call']);

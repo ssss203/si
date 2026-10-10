@@ -1,6 +1,6 @@
 // hash-sync 练习：改锁内文件必须同步哈希
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { CallEvent, ChatConfig, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, StateActivity, TypingStatus } from './shared/contracts';
+import type { CallEvent, ChatConfig, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, StateActivity, TypingStatus } from './shared/contracts';
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
   const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
@@ -59,6 +59,10 @@ const api: PetAPI = {
     clear: () => ipcRenderer.invoke('call:clear') as Promise<void>,
     resize: (width, height) => ipcRenderer.invoke('call:resize', { width, height }) as Promise<void>,
     onEvent: (listener) => subscribe<CallEvent>('call:event', listener),
+  },
+  engine: {
+    checkpoint: () => ipcRenderer.invoke('engine:checkpoint') as Promise<EngineCheckpoint | null>,
+    revert: () => ipcRenderer.invoke('engine:revert') as Promise<EngineRevertResult>,
   },
 };
 

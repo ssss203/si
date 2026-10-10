@@ -5,13 +5,13 @@
   "criticalFileHashes": {
     "forge.config.js": "d5c8432b8dbe5d263683e892c2d929b37b1d7fd80b6bb36392b04054e0b9d563",
     "webpack.renderer.config.js": "f0cbfe9f4f805126d0dd854b4024df83b2d08c2d67145ecae6bc29e5268ddda1",
-    "src/main.ts": "ae69c2bb93b84753d463d228ba8d6956f531ce5a32a7ba3805082464994a34ba",
-    "src/preload.ts": "188399222ccac190c3a2705aa6ee74fa41fa6d73f8d906a204c2314c3ad820b0",
+    "src/main.ts": "ad4aea713f5c2d7c1a93e253c5f875b5c6b212279662273fcfedaa8a8043b1d2",
+    "src/preload.ts": "2ec5909fb469551199422d73b9d8f06704b016c181017e16ad8de446f69c6cb1",
     "src/main/data-validation.ts": "b718a4e4648109c5c1f6d054221e5d7f010bf40bf68f98adfbafdd58d3a0baa8",
     "src/renderer/pet/state-machine.ts": "c361129351654bce7fb593152e0ff936df8aa5e9f1f2e06ce9fc7a1beffa49d3",
     "package.json": "1d35b2fc2b84ce1b12849faad0b7f26955fa5aa5d1eacb9f1e22409e0b8f40e1",
     "package-lock.json": "1aa143d4b0c1d6ec4c00ce5b39e1f3044dd7ab22f22002b9730e5c2b91a9f9d4",
-    "src/shared/contracts.ts": "9da14dda105acbf62d233a21cddabe82d90834c51043b18e279f254a67e70c0a",
+    "src/shared/contracts.ts": "3effea69ac5b5d8ea83a2d70d7368fc5c91e47817311dfb70ece7bc6cb968714",
     "src/renderer/pet/index.ts": "707a590cefd9a6d32b48e1f66d335d3361182848a2c214e36893f308ca2fcf05",
     "tests/e2e/app.e2e.ts": "549b49b032dc04bec78267f5dd8e4d31fd73bd0b5d2ad424fa9bdb0f11789ff4"
   }
