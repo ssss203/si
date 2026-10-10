@@ -61,5 +61,8 @@
     "sharp@0.34.5": true,
     "fsevents@2.3.2": false,
     "fsevents@2.3.3": false
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.0"
   }
 }

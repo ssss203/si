@@ -9,8 +9,8 @@
     "src/preload.ts": "188399222ccac190c3a2705aa6ee74fa41fa6d73f8d906a204c2314c3ad820b0",
     "src/main/data-validation.ts": "b718a4e4648109c5c1f6d054221e5d7f010bf40bf68f98adfbafdd58d3a0baa8",
     "src/renderer/pet/state-machine.ts": "c361129351654bce7fb593152e0ff936df8aa5e9f1f2e06ce9fc7a1beffa49d3",
-    "package.json": "2b90745156344892450e6d427eec3d409544da8b505b75e50ef6f72d606b65c1",
-    "package-lock.json": "9ab1155d405eceec01c39d18da5a3480aaf56341d9d08807f067e82978643d18",
+    "package.json": "1d35b2fc2b84ce1b12849faad0b7f26955fa5aa5d1eacb9f1e22409e0b8f40e1",
+    "package-lock.json": "1aa143d4b0c1d6ec4c00ce5b39e1f3044dd7ab22f22002b9730e5c2b91a9f9d4",
     "src/shared/contracts.ts": "9da14dda105acbf62d233a21cddabe82d90834c51043b18e279f254a67e70c0a",
     "src/renderer/pet/index.ts": "707a590cefd9a6d32b48e1f66d335d3361182848a2c214e36893f308ca2fcf05",
     "tests/e2e/app.e2e.ts": "549b49b032dc04bec78267f5dd8e4d31fd73bd0b5d2ad424fa9bdb0f11789ff4"
