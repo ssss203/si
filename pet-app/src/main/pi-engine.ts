@@ -35,6 +35,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { existsSync } from 'node:fs';
 import type { ChatTurn } from '../shared/contracts';
+import { createCheckpointExtension } from './pi-checkpoint';
 
 /** Pi SDK 的类型（type-only import 会被编译期擦除，不会在运行时加载） */
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -70,7 +71,22 @@ const MODEL_MAP: Readonly<Record<string, string>> = {
  */
 const TOOL_TIERS = {
   readOnly: ['read', 'grep', 'find', 'ls'],
+  readEdit: ['read', 'grep', 'find', 'ls', 'edit'],
 } as const;
+
+/**
+ * 这一轮到底开放哪些工具。
+ * 默认第 1 层只读；做实验时可以用环境变量临时放开，不用改代码：
+ *   $env:PET_PI_TOOLS = 'read,edit'   → 只读 + 改文件
+ */
+function activeTools(workspace: Workspace): string[] {
+  if (!workspace.allowTools) return [];
+  const override = (process.env.PET_PI_TOOLS ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  return override.length > 0 ? override : [...TOOL_TIERS.readOnly];
+}
 
 /** 桌宠专属的引擎数据目录：%APPDATA%\肆\ */
 function petRoot(): string {
@@ -243,6 +259,8 @@ async function getChatSession(
     systemPromptOverride: () => systemPrompt,
     // 必须给，否则 pi 会追加它自己的 APPEND_SYSTEM.md
     appendSystemPromptOverride: () => [],
+    // 改动前自动存档 + 受保护路径拦截（阶段 E / F 第一层）
+    extensionFactories: [createCheckpointExtension({ cwd: workspace.dir })],
   });
   await loader.reload();
 
@@ -251,8 +269,8 @@ async function getChatSession(
     model,
     modelRuntime: runtime,
     resourceLoader: loader,
-    // 权限分层：体检通过才给只读工具；不通过就退回"只能说话"
-    tools: workspace.allowTools ? [...TOOL_TIERS.readOnly] : [],
+    // 权限分层：体检通过才给工具；不通过就退回"只能说话"
+    tools: activeTools(workspace),
     sessionManager: sdk.SessionManager.inMemory(workspace.dir),
   });
 
@@ -384,7 +402,7 @@ export async function resetPiChatSession(): Promise<void> {
 /** 给探针/诊断用：当前它会用哪个工作目录、开不开工具 */
 export function describeWorkspace(): Workspace & { tools: readonly string[] } {
   const workspace = projectRoot();
-  return { ...workspace, tools: workspace.allowTools ? [...TOOL_TIERS.readOnly] : [] };
+  return { ...workspace, tools: activeTools(workspace) };
 }
 
 // TODO(下一步)：
