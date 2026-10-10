@@ -1,6 +1,6 @@
 // hash-sync 练习：改锁内文件必须同步哈希
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { CallEvent, ChatConfig, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, StateActivity, TypingStatus } from './shared/contracts';
+import type { CallEvent, ChatConfig, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
   const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
@@ -63,6 +63,13 @@ const api: PetAPI = {
   engine: {
     checkpoint: () => ipcRenderer.invoke('engine:checkpoint') as Promise<EngineCheckpoint | null>,
     revert: () => ipcRenderer.invoke('engine:revert') as Promise<EngineRevertResult>,
+  },
+  // 技能管理（功能 B）：肆自己写的技能要主人批准才生效
+  skills: {
+    overview: () => ipcRenderer.invoke('skills:overview') as Promise<SkillsOverview>,
+    approve: (name) => ipcRenderer.invoke('skills:approve', name) as Promise<SkillsOverview>,
+    disable: (name) => ipcRenderer.invoke('skills:disable', name) as Promise<SkillsOverview>,
+    remove: (name) => ipcRenderer.invoke('skills:remove', name) as Promise<SkillsOverview>,
   },
 };
 

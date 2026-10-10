@@ -19,7 +19,10 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+
 
 .card {
   background: var(--surface, #ffffff);
@@ -252,4 +255,137 @@ html, body {
 .content-scroll::-webkit-scrollbar-thumb {
   background: var(--accent, #ffc987);
   border-radius: 2px;
+}
+
+/* ── 技能与工具（功能 B）：肆自己写的技能要主人批准才生效 ────────────── */
+
+/* 小节标题：比 .section-title 小一号，用来分隔"已启用 / 待批准 / 能用哪些工具" */
+.skill-subtitle {
+  font-size: 12px;
+  color: var(--muted, #9a7b6a);
+  margin: 10px 0 6px;
+}
+
+/* 一条技能（名字 + 说明 + 操作按钮） */
+.skill-row {
+  background: var(--background, #fff7ed);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.skill-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skill-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #3a2a20);
+  word-break: break-all;
+}
+
+.skill-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.skill-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #9a7b6a);
+  margin-top: 6px;
+  word-break: break-word;
+}
+
+.skill-path {
+  font-size: 11px;
+  color: var(--muted, #9a7b6a);
+  margin-top: 6px;
+  opacity: 0.8;
+  word-break: break-all;
+}
+
+/* 行内小按钮：沿用 .size-btn 的描边风格 */
+.skill-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--accent, #ffc987);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text, #3a2a20);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.skill-btn:hover {
+  background: var(--accent, #ffc987);
+}
+
+.skill-btn.danger {
+  color: #c62828;
+  border-color: #f0b7b3;
+}
+
+.skill-btn.danger:hover {
+  background: #fdecea;
+}
+
+/* 工具清单：只读的小标签，告诉主人"它现在手里有哪些工具" */
+.tool-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool-chip {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--background, #fff7ed);
+  color: var(--text, #3a2a20);
+  font-size: 12px;
+}
+
+/* 没有技能 / 没有工具时的灰字 */
+.skill-empty {
+  font-size: 12px;
+  color: var(--muted, #9a7b6a);
+  padding: 4px 0;
+}
+
+
+/* 隐形滚动条：能滚，但不显示那条丑丑的轨道 */
+#dashboard {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+}
+#dashboard::-webkit-scrollbar {
+  width: 6px;
+}
+#dashboard::-webkit-scrollbar-track {
+  background: transparent;
+}
+#dashboard::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 3px;
+}
+#dashboard::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* 技能面板里那句"准确比数量重要"的提醒 */
+.skill-hint {
+  margin: 8px 0 12px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 200, 80, 0.14);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text, #333);
 }

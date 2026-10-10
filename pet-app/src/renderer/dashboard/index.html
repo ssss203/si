@@ -25,7 +25,10 @@
       display: flex;
       flex-direction: column;
       gap: 16px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
+    
     .card {
       background: var(--surface, #ffffff);
       border-radius: var(--radius, 24px);
@@ -280,6 +283,21 @@
               <button class="size-btn" data-scale="1.2">超大</button>
             </div>
           </div>
+        </div>
+
+        <div class="settings-group">
+          <div class="section-title">🧩 技能与工具</div>
+          <div class="setting-desc">肆可以自己写技能，但只有你点「启用」才会生效（文件从 skills-pending 移进 skills）。停用或删除后它立刻忘掉。</div>
+
+          <div class="skill-hint">⚠️ 技能不是越多越好：每个技能都会占掉系统提示词，塞太多反而稀释注意力、也更费 token。<b>准确</b>比数量重要 —— 一个写得准的技能，胜过五个泛泛的。</div>
+<div class="skill-subtitle">已启用（它现在真的会这些）</div>
+          <div id="skills-enabled"></div>
+
+          <div class="skill-subtitle">待批准（它写的，还没生效）</div>
+          <div id="skills-pending"></div>
+
+          <div class="skill-subtitle">它现在能用的工具</div>
+          <div class="tool-list" id="skills-tools"></div>
         </div>
       </div>
     </div>

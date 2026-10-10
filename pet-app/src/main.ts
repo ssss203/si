@@ -3,7 +3,7 @@ import { copyFile, lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import specData from '../pet-spec.json';
-import type { CallEvent, ChatConfig, ChatTurn, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, StateActivity, TypingStatus } from './shared/contracts';
+import type { CallEvent, ChatConfig, ChatTurn, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
 import { assertInteractionId, assertReminderInput, assertRuntimeFailureReport, assertRuntimeReadyReport, assertSettingsPatch, assertStringArray } from './shared/contracts';
 import { draggedBounds, snapBounds, type Point, type Rect } from './main/drag';
 import { JsonLogger } from './main/logger';
@@ -15,8 +15,11 @@ import { readValidatedJson } from './main/persistence';
 import { deepseekChatStream, deepseekShortReply } from './main/deepseek';
 // 引擎侧工具：清空会话记忆 / 撤回 agent 改动。
 // 注意这两个不经过引擎开关（deepseek.ts）：即使切回 HTTP 引擎，按钮也照常工作。
-import { resetPiChatSession, describeWorkspace } from './main/pi-engine';
+import { resetPiChatSession, rebuildPiChatSession, describeWorkspace } from './main/pi-engine';
 import { readLatestCheckpoint, restoreLatestCheckpoint } from './main/pi-checkpoint';
+// 技能（功能 B）：肆自己写的技能先落在 skills-pending，主人批准后才移进 skills。
+// 名字校验正则和 pi-skills.ts 里 create_skill 用的是同一个（防路径穿越）。
+import { assertSkillName, describeSkills, moveSkillFile, removeSkillFile } from './main/pi-skills';
 import trayIconPath from './assets/tray/tray-icon.png';
 
 const spec = specData as PetSpec;
@@ -118,6 +121,10 @@ const defaultChatConfig: ChatConfig = {
   deepseekModel: 'deepseek-chat',
   ttsEnabled: true,
   aiBubbles: false,
+  // 主动行为（播动画 / 主动说话 / 安排提醒）缺省为开，和 aiBubbles 一样属于"主动行为"类开关。
+  // 注意：这个字段是 pi 的 actions 扩展自己从 coze-config.json 读的（见 pi-actions.ts），
+  // 这里同步一份是为了让通话面板能显示/修改它；改完必须重建会话才会生效。
+  proactiveActions: true,
 };
 
 let callAbort: AbortController | undefined;
@@ -132,11 +139,28 @@ function parseChatConfig(value: unknown): ChatConfig {
     deepseekModel: typeof obj.deepseekModel === 'string' && obj.deepseekModel ? obj.deepseekModel : fallback.deepseekModel,
     ttsEnabled: typeof obj.ttsEnabled === 'boolean' ? obj.ttsEnabled : fallback.ttsEnabled,
     aiBubbles: typeof obj.aiBubbles === 'boolean' ? obj.aiBubbles : fallback.aiBubbles,
+    proactiveActions: typeof obj.proactiveActions === 'boolean' ? obj.proactiveActions : fallback.proactiveActions,
   };
 }
 
 function sendCallEvent(event: CallEvent): void {
   if (callWindow && !callWindow.isDestroyed()) callWindow.webContents.send('call:event', event);
+}
+
+/**
+ * 技能根目录 = 桌宠数据目录 %APPDATA%\肆（和 pi-engine.ts 的 petRoot() 必须一致）。
+ * 里面两个子目录（不在 main.ts 里拼路径，统一交给 pi-skills.ts，避免两处写法漂移）：
+ *   skills/          已启用 —— pi-engine 把它接进 additionalSkillPaths，pi 会扫
+ *   skills-pending/  待批准 —— pi 不扫；肆只能往这里写
+ */
+function skillsRootDir(): string {
+  return path.join(process.env.APPDATA ?? path.join(app.getPath('home'), 'AppData', 'Roaming'), '肆');
+}
+
+/** 读技能总览：两个目录 + 它现在真正能用的工具（来自 pi-engine 的白名单体检结果） */
+async function readSkillsOverview(): Promise<SkillsOverview> {
+  const { enabled, pending } = await describeSkills(skillsRootDir());
+  return { enabled, pending, tools: [...describeWorkspace().tools] };
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -823,7 +847,7 @@ function registerIpc(): void {
     assertSender(event, ['call']);
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Invalid call config patch');
     const obj = patch as Record<string, unknown>;
-    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles']);
+    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles', 'proactiveActions']);
     for (const key of Object.keys(obj)) {
       if (!allowed.has(key)) throw new TypeError(`Unknown call config field: ${key}`);
     }
@@ -831,8 +855,13 @@ function registerIpc(): void {
     if ('deepseekApiKey' in obj && (typeof obj.deepseekApiKey !== 'string' || obj.deepseekApiKey.length > 200)) throw new TypeError('Invalid deepseekApiKey');
     if ('deepseekModel' in obj && (typeof obj.deepseekModel !== 'string' || !obj.deepseekModel || obj.deepseekModel.length > 100)) throw new TypeError('Invalid deepseekModel');
     if ('aiBubbles' in obj && typeof obj.aiBubbles !== 'boolean') throw new TypeError('Invalid aiBubbles');
+    if ('proactiveActions' in obj && typeof obj.proactiveActions !== 'boolean') throw new TypeError('Invalid proactiveActions');
+    // 主动行为开关变了要重建 pi 会话：pi 的扩展（这里指 actions 扩展）是**建会话时**注册的，
+    // 不重建的话"关掉"只是改了磁盘上的 JSON，工具还在这个会话里活着。
+    const proactiveChanged = 'proactiveActions' in obj && obj.proactiveActions !== cozeConfig.proactiveActions;
     cozeConfig = { ...cozeConfig, ...patch };
     await atomicWriteJson(userFile('coze-config.json'), cozeConfig);
+    if (proactiveChanged) await rebuildPiChatSession();
     return cozeConfig;
   });
   ipcMain.handle('call:send', async (event, text: unknown) => {
@@ -929,6 +958,32 @@ function registerIpc(): void {
     } catch (error) {
       return { ok: false, message: `撤回失败：${error instanceof Error ? error.message : String(error)}` };
     }
+  });
+  // ── 技能管理（功能 B）────────────────────────────────────────────────────
+  // 只有 dashboard 能调（技能能改变肆的行为，这是个敏感动作）。
+  // 每个 handler 结尾都重建 pi 会话：pi 的技能清单是建会话时扫盘进系统提示词的，
+  // 不重建的话"刚启用"要等到下次重启才生效。
+  ipcMain.handle('skills:overview', async (event) => {
+    assertSender(event, ['dashboard']);
+    return readSkillsOverview();
+  });
+  ipcMain.handle('skills:approve', async (event, name: unknown) => {
+    assertSender(event, ['dashboard']);
+    await moveSkillFile(skillsRootDir(), assertSkillName(name), 'approve');
+    await rebuildPiChatSession();
+    return readSkillsOverview();
+  });
+  ipcMain.handle('skills:disable', async (event, name: unknown) => {
+    assertSender(event, ['dashboard']);
+    await moveSkillFile(skillsRootDir(), assertSkillName(name), 'disable');
+    await rebuildPiChatSession();
+    return readSkillsOverview();
+  });
+  ipcMain.handle('skills:remove', async (event, name: unknown) => {
+    assertSender(event, ['dashboard']);
+    await removeSkillFile(skillsRootDir(), assertSkillName(name));
+    await rebuildPiChatSession();
+    return readSkillsOverview();
   });
   ipcMain.handle('call:resize', (event, payload: unknown) => {
     assertSender(event, ['call']);

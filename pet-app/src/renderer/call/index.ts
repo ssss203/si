@@ -30,6 +30,7 @@ const dsKeyInput = document.getElementById('ds-key') as HTMLInputElement;
 const dsModelSelect = document.getElementById('ds-model') as HTMLSelectElement;
 const ttsToggle = document.getElementById('toggle-tts') as HTMLDivElement;
 const aiBubbleToggle = document.getElementById('toggle-aibubble') as HTMLDivElement;
+const proactiveToggle = document.getElementById('toggle-proactive') as HTMLDivElement;
 const saveConfigBtn = document.getElementById('save-config') as HTMLButtonElement;
 const saveHint = document.getElementById('save-hint') as HTMLSpanElement;
 
@@ -38,6 +39,7 @@ let config: ChatConfig = {
   deepseekModel: 'deepseek-chat',
   ttsEnabled: true,
   aiBubbles: false,
+  proactiveActions: true,
 };
 let busy = false;
 let currentReply = '';
@@ -164,6 +166,7 @@ async function loadConfig(): Promise<void> {
     dsModelSelect.value = config.deepseekModel;
     ttsToggle.classList.toggle('active', config.ttsEnabled);
     aiBubbleToggle.classList.toggle('active', config.aiBubbles);
+    proactiveToggle.classList.toggle('active', config.proactiveActions);
   } catch (error) {
     console.error('Failed to load call config:', error);
   }
@@ -176,6 +179,7 @@ async function saveConfig(): Promise<void> {
       deepseekModel: dsModelSelect.value,
       ttsEnabled: config.ttsEnabled,
       aiBubbles: config.aiBubbles,
+      proactiveActions: config.proactiveActions,
     }) ?? config;
     saveHint.textContent = '已保存 ✓';
     saveHint.className = 'save-hint ok';
@@ -294,6 +298,11 @@ ttsToggle.addEventListener('click', () => {
 aiBubbleToggle.addEventListener('click', () => {
   config.aiBubbles = !config.aiBubbles;
   aiBubbleToggle.classList.toggle('active', config.aiBubbles);
+});
+// 主动行为开关：保存时 main.ts 会重建 pi 会话，否则关掉了工具还在（扩展是建会话时注册的）
+proactiveToggle.addEventListener('click', () => {
+  config.proactiveActions = !config.proactiveActions;
+  proactiveToggle.classList.toggle('active', config.proactiveActions);
 });
 
 saveConfigBtn.addEventListener('click', () => void saveConfig());

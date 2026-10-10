@@ -39,6 +39,7 @@ import type { ChatTurn } from '../shared/contracts';
 import { createCheckpointExtension } from './pi-checkpoint';
 import { createProjectToolsExtension } from './pi-tools';
 import { createActionsExtension } from './pi-actions';
+import { createSkillsExtension } from './pi-skills';
 
 /** Pi SDK 的类型（type-only import 会被编译期擦除，不会在运行时加载） */
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -73,10 +74,10 @@ const MODEL_MAP: Readonly<Record<string, string>> = {
  *   第 4 层：+ bash（改逻辑/跑测试）  ← 最后才开，且必须有命令白名单
  */
 const TOOL_TIERS = {
-  // 注意：自定义工具（run_checks / git_status）也必须列进来，
+  // 注意：自定义工具（run_checks / git_status / 动作工具 / 技能工具）也必须列进来，
   // 否则会被 tools 白名单过滤掉 —— 白名单管的是"所有工具"，不区分内置还是自定义。
-  readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status', 'play_animation', 'say', 'remind'],
-  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status', 'play_animation', 'say', 'remind'],
+  readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status', 'play_animation', 'say', 'remind', 'create_skill', 'list_skills'],
+  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status', 'play_animation', 'say', 'remind', 'create_skill', 'list_skills'],
 } as const;
 
 /**
@@ -100,6 +101,10 @@ function activeTools(workspace: Workspace): string[] {
 
 /** 桌宠专属的引擎数据目录：%APPDATA%\肆\ */
 function petRoot(): string {
+  // 探针/测试可以用 PET_PI_ROOT 整个换掉这个目录（技能、agent 目录、auth 都跟着走），
+  // 这样测试写下的技能不会混进桌宠真实的 skills/ 里。
+  const override = (process.env.PET_PI_ROOT ?? '').trim();
+  if (override.length > 0) return override;
   return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), '肆');
 }
 
@@ -313,6 +318,12 @@ async function getChatSession(
         cwd: workspace.dir,
         emit: (event) => chatSession?.sink?.onEvent?.(event),
       }),
+      // 扩展四：技能工具（功能 B）。肆可以自己写技能，但只写进 skills-pending；
+      // 只有主人批准（移到 skills/）之后，下一次建会话才会被 pi 扫到并加进系统提示词。
+      createSkillsExtension({
+        cwd: workspace.dir,
+        skillsRoot: agentRoot,
+      }),
     ],
   });
   await loader.reload();
@@ -460,6 +471,19 @@ export async function piShortReply(options: PiShortReplyOptions): Promise<string
 export async function resetPiChatSession(): Promise<void> {
   // 不是删会话文件，而是"下一次开一个新的" —— 旧记忆留在磁盘上，你随时能翻
   forceNewSession = true;
+  await disposeChatSession();
+}
+
+/**
+ * 只重建会话对象，**继续同一个会话文件**（不失忆）。
+ *
+ * 什么时候用：扩展/工具/技能是在建会话时注册的，所以改了这些（切换主动行为开关、
+ * 启用技能）必须重建会话才生效 —— 但用户并不想因此失忆，所以这里不设 forceNewSession，
+ * 下一次调用会用 SessionManager.continueRecent 接着最近那个会话文件继续聊。
+ *
+ * 对比：resetPiChatSession() = 清空对话（开新文件）；rebuildPiChatSession() = 换零件（接着聊）
+ */
+export async function rebuildPiChatSession(): Promise<void> {
   await disposeChatSession();
 }
 

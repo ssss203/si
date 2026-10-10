@@ -168,6 +168,29 @@ export interface ChatConfig {
   deepseekApiKey: string;
   deepseekModel: string;
   aiBubbles: boolean;
+  /**
+   * 主动行为总开关（播放动画 / 主动说话 / 安排提醒）。
+   * 缺省为开；关掉时 pi 的 actions 扩展连工具都不注册。
+   * 改这个值必须重建 pi 会话（扩展是建会话时注册的），见 main.ts 的 call:config-save。
+   */
+  proactiveActions: boolean;
+}
+
+/** 一条技能（肆自己写的 or 主人启用过的） */
+export interface SkillInfo {
+  name: string;
+  description: string;
+  /** 文件绝对路径，面板上可以给主人看"它到底往哪写" */
+  path: string;
+  /** 文件最后修改时间（ISO 字符串） */
+  updatedAt: string;
+}
+
+/** 技能面板要的全部数据：已启用 / 待批准 / 它现在能用的工具 */
+export interface SkillsOverview {
+  enabled: SkillInfo[];
+  pending: SkillInfo[];
+  tools: string[];
 }
 
 export interface ChatTurn {
@@ -252,6 +275,20 @@ export interface PetAPI {
     checkpoint: () => Promise<EngineCheckpoint | null>;
     /** 撤回到最近一次存档：改坏了点一下就回去 */
     revert: () => Promise<EngineRevertResult>;
+  };
+  /**
+   * 技能管理（功能 B）：肆可以自己写技能，但只有主人批准（approve）才会被 pi 加载。
+   * 安全模型：默认不加载任何外来东西 —— pi 只扫 <petRoot>/skills，肆只能写 <petRoot>/skills-pending。
+   */
+  skills: {
+    /** 已启用 / 待批准 / 当前工具白名单 */
+    overview: () => Promise<SkillsOverview>;
+    /** 待批准 → 已启用（文件从 skills-pending 移到 skills） */
+    approve: (name: string) => Promise<SkillsOverview>;
+    /** 已启用 → 待批准（反向移动，随时能反悔） */
+    disable: (name: string) => Promise<SkillsOverview>;
+    /** 删除技能文件 */
+    remove: (name: string) => Promise<SkillsOverview>;
   };
 }
 
