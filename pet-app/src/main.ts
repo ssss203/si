@@ -3,8 +3,8 @@ import { copyFile, lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import specData from '../pet-spec.json';
-import type { CallEvent, ChatConfig, ChatTurn, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
-import { assertInteractionId, assertReminderInput, assertRuntimeFailureReport, assertRuntimeReadyReport, assertSettingsPatch, assertStringArray } from './shared/contracts';
+import type { ApprovalDirsOverview, ApprovalDecision, ApprovalRequestView, CallEvent, ChatConfig, ChatTurn, CompanionSnapshot, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
+import { assertApprovalResponse, assertInteractionId, assertReminderInput, assertRuntimeFailureReport, assertRuntimeReadyReport, assertSettingsPatch, assertStringArray } from './shared/contracts';
 import { draggedBounds, snapBounds, type Point, type Rect } from './main/drag';
 import { JsonLogger } from './main/logger';
 import { atomicWriteJson, uniqueDestination } from './main/persistence';
@@ -20,6 +20,23 @@ import { readLatestCheckpoint, restoreLatestCheckpoint } from './main/pi-checkpo
 // 技能（功能 B）：肆自己写的技能先落在 skills-pending，主人批准后才移进 skills。
 // 名字校验正则和 pi-skills.ts 里 create_skill 用的是同一个（防路径穿越）。
 import { assertSkillName, describeSkills, moveSkillFile, removeSkillFile } from './main/pi-skills';
+// 授权门（阶段 F）：改工作目录外的文件前弹小窗问主人；已授权目录可在这里读/撤销。
+import { approvalTimeoutMs, assertAllowedDir, readAllowedDirs, removeAllowedDir } from './main/pi-approval';
+import type { ApprovalRequest as GateApprovalRequest } from './main/pi-approval';
+// 陪伴感知：低频瞥一眼前台窗口 → 闭集标签 → 内存历史 → 注进当前这一轮请求。
+// 隐私边界全部在这个模块里（原文永不落盘、只出闭集标签、默认关闭不采样）。
+import {
+  activityAge,
+  clearActivityHistory,
+  ensureActivityRulesFile,
+  getActivityHistory,
+  latestActivity,
+  loadActivityRules,
+  readForegroundWindow,
+  recordActivity,
+  startCompanionSampler,
+  type CompanionSample,
+} from './main/pi-companion';
 import trayIconPath from './assets/tray/tray-icon.png';
 
 const spec = specData as PetSpec;
@@ -67,11 +84,13 @@ async function loadRoleCard(): Promise<void> {
   }
 }
 
-type Role = 'pet' | 'reminder' | 'dashboard' | 'call';
+type Role = 'pet' | 'reminder' | 'dashboard' | 'call' | 'approval';
 let petWindow: BrowserWindow | undefined;
 let reminderWindow: BrowserWindow | undefined;
 let dashboardWindow: BrowserWindow | undefined;
 let callWindow: BrowserWindow | undefined;
+/** 授权门小窗（阶段 F）：懒创建 —— 只有真的需要问主人才建，不参与启动时的三窗口门 */
+let approvalWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let logger: JsonLogger | undefined;
 let settings: Settings;
@@ -125,6 +144,9 @@ const defaultChatConfig: ChatConfig = {
   // 注意：这个字段是 pi 的 actions 扩展自己从 coze-config.json 读的（见 pi-actions.ts），
   // 这里同步一份是为了让通话面板能显示/修改它；改完必须重建会话才会生效。
   proactiveActions: true,
+  // 陪伴感知：**默认关闭（opt-in）**。这是隐私相关的开关，必须主人自己打开。
+  // 关掉时主进程连采样定时器都不建 —— 一次前台窗口读取都不会发生。
+  companionAwareness: false,
 };
 
 let callAbort: AbortController | undefined;
@@ -140,6 +162,8 @@ function parseChatConfig(value: unknown): ChatConfig {
     ttsEnabled: typeof obj.ttsEnabled === 'boolean' ? obj.ttsEnabled : fallback.ttsEnabled,
     aiBubbles: typeof obj.aiBubbles === 'boolean' ? obj.aiBubbles : fallback.aiBubbles,
     proactiveActions: typeof obj.proactiveActions === 'boolean' ? obj.proactiveActions : fallback.proactiveActions,
+    // 字段级回退：老配置文件里没有这个字段时是 undefined → 落回 false（默认关闭）
+    companionAwareness: typeof obj.companionAwareness === 'boolean' ? obj.companionAwareness : fallback.companionAwareness,
   };
 }
 
@@ -161,6 +185,58 @@ function skillsRootDir(): string {
 async function readSkillsOverview(): Promise<SkillsOverview> {
   const { enabled, pending } = await describeSkills(skillsRootDir());
   return { enabled, pending, tools: [...describeWorkspace().tools] };
+}
+
+// ── 陪伴感知：透明度面板 + 采样器生命周期 ─────────────────────────────────────
+//
+// 分工很明确，别搞混：
+//   · 采样与隐私边界全在 main/pi-companion.ts（纯函数 + 可注入依赖，探针不用起 Electron）
+//   · 这里只做两件事：① 把内存历史整理成面板形状（顺手算"持续了多久"）
+//   ·                    ② 按开关起/停采样定时器（开关关 = 定时器都不建）
+
+/** 给 dashboard 的快照：只含闭集标签 + 时间，**没有任何标题字段** */
+function companionSnapshot(): CompanionSnapshot {
+  const history = getActivityHistory();
+  const now = Date.now();
+  return {
+    enabled: cozeConfig?.companionAwareness === true,
+    lastSampleAt: history.length > 0 ? (history[history.length - 1] as CompanionSample).at : null,
+    // 只有最新那条算得出"持续了多久"（下一条采样会把它封口）
+    activities: history.map((sample, index) => (
+      index === history.length - 1
+        ? { tag: sample.tag, at: sample.at, durationMinutes: activityAge(sample, now).minutes }
+        : { tag: sample.tag, at: sample.at }
+    )),
+  };
+}
+
+/** 当前挂着的采样定时器（开关切换时换一个） */
+let stopCompanionSampler: (() => void) | undefined;
+
+/**
+ * 按开关起/停采样。
+ *
+ * 关掉时 `startCompanionSampler` 连定时器都不建（它第一行就 early return），
+ * 所以"关掉 = 不采样"是真的，不是"采了不用"。
+ * 每次调用先停旧的，保证任何时刻最多只有一个定时器。
+ */
+function restartCompanionSampler(): void {
+  stopCompanionSampler?.();
+  stopCompanionSampler = undefined;
+  if (cozeConfig?.companionAwareness !== true) return;
+
+  stopCompanionSampler = startCompanionSampler({
+    enabled: true,
+    // 每次采样只读一次前台窗口；读不到（超时 / 非 Windows）就静默跳过这一轮
+    sample: () => readForegroundWindow(),
+    // 每次采样都重读规则文件：主人改 activity-rules.json 不用重启桌宠
+    rules: () => loadActivityRules(),
+    record: recordActivity,
+    onError: (message) => {
+      // ⚠️ 只能记错误信息。**绝不**把窗口标题写进日志 —— 那是这个功能唯一的红线。
+      void logger?.write('warn', 'companion-sample-failed', { message: message.slice(0, 300) });
+    },
+  });
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -596,6 +672,107 @@ function showCallWindow(): void {
   callWindow.webContents.send('call:event', { kind: 'status', status: 'idle' } satisfies CallEvent);
 }
 
+// ── 授权门小窗（阶段 F）──────────────────────────────────────────────────────
+// 三条通道分得清：
+//   · pi 的扩展（pi-approval.ts）在工具调用前问一次 → requestApprovalFromMaster
+//   · approval 窗口只回答"当前这一问"（approval:current / approval:respond）
+//   · dashboard 只读列表 + 撤销（approval:list / approval:revoke）
+// 注意：这里不做"能不能改文件"的判定 —— 判定是 pi-approval.ts 里的纯函数，
+// 主进程只负责"把问题显示出来、把选择送回去"。
+
+/** 当前挂着的那一问（一次只问一件；上一件没答完就被新问题顶掉时，按拒绝处理） */
+let pendingApproval: {
+  id: string;
+  view: ApprovalRequestView;
+  resolve: (decision: ApprovalDecision) => void;
+  detach: () => void;
+} | undefined;
+
+/** 懒创建授权小窗（和 callWindow 一个套路），定位在桌宠上方 */
+function ensureApprovalWindow(): BrowserWindow | undefined {
+  if (approvalWindow && !approvalWindow.isDestroyed()) return approvalWindow;
+  approvalWindow = secureWindow({
+    width: 460,
+    height: 380,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    show: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: true,
+    title: `${spec.character.displayName}想问你一件事`,
+    opacity: e2eMode ? 0 : 1,
+  }, 'approval', APPROVAL_WINDOW_PRELOAD_WEBPACK_ENTRY);
+  void approvalWindow.loadURL(APPROVAL_WINDOW_WEBPACK_ENTRY);
+  approvalWindow.on('close', (event) => {
+    if (!isQuitting) { event.preventDefault(); approvalWindow?.hide(); }
+  });
+  return approvalWindow;
+}
+
+/** 结束当前这一问：关窗 + 把选择交回给等在 pi 扩展里的那一轮。过期的 id 返回 false */
+function settleApproval(id: string, decision: ApprovalDecision): boolean {
+  const pending = pendingApproval;
+  if (!pending || pending.id !== id) return false;
+  pendingApproval = undefined;
+  pending.detach();
+  if (approvalWindow && !approvalWindow.isDestroyed()) approvalWindow.hide();
+  pending.resolve(decision);
+  return true;
+}
+
+/** 当前这一问还挂着就拒绝掉（退出、或它的那一轮被打断时用） */
+function denyPendingApproval(): void {
+  if (pendingApproval) settleApproval(pendingApproval.id, 'deny');
+}
+
+/**
+ * 问主人一次（pi 的授权门扩展调这个）。
+ *
+ * 60 秒的超时**由扩展那边**计时：它 abort 这个 request 的 signal，这里收到就关窗 + 回 deny。
+ * 为什么不在主进程计时：这样"超时"这句话只有一个来源（扩展知道自己是不是被超时打断的），
+ * 两边的 60 秒也不会各自飘。窗被关掉、主人答了、这一轮被中止 —— 三条路都只会 settle 一次。
+ */
+function requestApprovalFromMaster(request: GateApprovalRequest): Promise<ApprovalDecision> {
+  return new Promise<ApprovalDecision>((resolve) => {
+    // 一次只问一件：上一件还挂着就直接拒绝（它的那一轮已经被新消息打断了）
+    denyPendingApproval();
+
+    const id = randomUUID();
+    const view: ApprovalRequestView = {
+      id,
+      toolName: request.toolName,
+      path: request.path,
+      dir: request.dir,
+      expiresAt: new Date(Date.now() + approvalTimeoutMs()).toISOString(),
+    };
+    const onAbort = (): void => { settleApproval(id, 'deny'); };
+    request.signal?.addEventListener('abort', onAbort, { once: true });
+    pendingApproval = {
+      id,
+      view,
+      resolve,
+      detach: () => request.signal?.removeEventListener('abort', onAbort),
+    };
+    void logger?.write('warn', 'approval-requested', { toolName: request.toolName, path: request.path });
+
+    const window = ensureApprovalWindow();
+    if (!window || window.isDestroyed()) { settleApproval(id, 'deny'); return; }
+    positionAbovePet(window);
+    if (e2eMode) window.showInactive();
+    else {
+      window.show();
+      window.focus();
+    }
+    // 先 send 再让渲染层自己 current() 拉一次：窗口第一次创建时 loadURL 是异步的，
+    // 首个事件可能比监听器先到，两边都带 id，重复画同一问是幂等的。
+    window.webContents.send('approval:request', view);
+    if (request.signal?.aborted) settleApproval(id, 'deny');
+  });
+}
+
 function buildPetMenu(): Electron.MenuItemConstructorOptions[] {
   const items: Electron.MenuItemConstructorOptions[] = [];
   if (spec.features.interactions) {
@@ -725,7 +902,7 @@ function registerIpc(): void {
     });
   }
   ipcMain.handle('runtime:renderer-ready', async (event, payload: unknown) => {
-    const role = assertSender(event, ['pet', 'dashboard', 'reminder', 'call']);
+    const role = assertSender(event, ['pet', 'dashboard', 'reminder', 'call', 'approval']);
     if (
       !payload
       || typeof payload !== 'object'
@@ -740,7 +917,7 @@ function registerIpc(): void {
     await commitRuntimeReady();
   });
   ipcMain.handle('runtime:renderer-failed', async (event, payload: unknown) => {
-    const role = assertSender(event, ['pet', 'dashboard', 'reminder']);
+    const role = assertSender(event, ['pet', 'dashboard', 'reminder', 'call', 'approval']);
     const message = payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
       ? payload.message.slice(0, 2000)
       : 'Unknown renderer bootstrap failure';
@@ -847,7 +1024,7 @@ function registerIpc(): void {
     assertSender(event, ['call']);
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Invalid call config patch');
     const obj = patch as Record<string, unknown>;
-    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles', 'proactiveActions']);
+    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles', 'proactiveActions', 'companionAwareness']);
     for (const key of Object.keys(obj)) {
       if (!allowed.has(key)) throw new TypeError(`Unknown call config field: ${key}`);
     }
@@ -856,12 +1033,22 @@ function registerIpc(): void {
     if ('deepseekModel' in obj && (typeof obj.deepseekModel !== 'string' || !obj.deepseekModel || obj.deepseekModel.length > 100)) throw new TypeError('Invalid deepseekModel');
     if ('aiBubbles' in obj && typeof obj.aiBubbles !== 'boolean') throw new TypeError('Invalid aiBubbles');
     if ('proactiveActions' in obj && typeof obj.proactiveActions !== 'boolean') throw new TypeError('Invalid proactiveActions');
+    if ('companionAwareness' in obj && typeof obj.companionAwareness !== 'boolean') throw new TypeError('Invalid companionAwareness');
     // 主动行为开关变了要重建 pi 会话：pi 的扩展（这里指 actions 扩展）是**建会话时**注册的，
     // 不重建的话"关掉"只是改了磁盘上的 JSON，工具还在这个会话里活着。
     const proactiveChanged = 'proactiveActions' in obj && obj.proactiveActions !== cozeConfig.proactiveActions;
+    // 陪伴感知同理（注入也是建会话时注册的 'context' 扩展）。
+    // 这里用 rebuildPiChatSession **而不是** resetPiChatSession：前者换零件、接着聊（不失忆），
+    // 后者会开一个新的会话文件（清空对话记忆）—— 开关设置不该让主人丢聊天记录。
+    const companionChanged = 'companionAwareness' in obj && obj.companionAwareness !== cozeConfig.companionAwareness;
     cozeConfig = { ...cozeConfig, ...patch };
     await atomicWriteJson(userFile('coze-config.json'), cozeConfig);
     if (proactiveChanged) await rebuildPiChatSession();
+    if (companionChanged) {
+      await rebuildPiChatSession();
+      // 采样器的起停跟着开关走：关掉 → 连定时器都不建（不是"采了不用"）
+      restartCompanionSampler();
+    }
     return cozeConfig;
   });
   ipcMain.handle('call:send', async (event, text: unknown) => {
@@ -869,6 +1056,8 @@ function registerIpc(): void {
     if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new TypeError('Invalid call message');
     const trimmed = text.trim();
     if (callAbort) callAbort.abort();
+    // 上一轮如果正挂着授权询问，跟着一起作废（否则小窗会一直杵在那儿等满 60 秒）
+    denyPendingApproval();
     callAbort = new AbortController();
     sendCallEvent({ kind: 'status', status: 'thinking' });
     sendCallEvent({ kind: 'delta', text: '' });
@@ -909,6 +1098,9 @@ function registerIpc(): void {
             void persistReminders().then(() => scheduleReminder(reminder)).catch(() => { });
           }
         },
+        // 阶段 F：授权门。它要改工作目录外的文件时，pi-approval.ts 会调这个问主人；
+        // 不传 = 没人可问 = 工作目录外一律拒绝（fail-closed）。
+        requestApproval: requestApprovalFromMaster,
         signal: callAbort.signal,
       });
       replyText = reply.text;
@@ -931,6 +1123,8 @@ function registerIpc(): void {
     assertSender(event, ['call']);
     callAbort?.abort();
     callAbort = undefined;
+    // 主人点了"停止"：还挂着的授权询问也一起按拒绝收场
+    denyPendingApproval();
     sendCallEvent({ kind: 'status', status: 'idle' });
   });
   ipcMain.handle('call:clear', async (event) => {
@@ -1005,6 +1199,46 @@ function registerIpc(): void {
   ipcMain.handle('window:hide-dashboard', (event) => { assertSender(event, ['dashboard']); dashboardWindow?.hide(); });
   ipcMain.handle('window:hide-pet', (event) => { assertSender(event, ['pet', 'dashboard']); petWindow?.hide(); });
   ipcMain.handle('window:hide-call', (event) => { assertSender(event, ['call']); callWindow?.hide(); });
+  // ── 授权门（阶段 F）────────────────────────────────────────────────────
+  // 权限分得很细：只有 approval 窗口能回答"这一问"，只有 dashboard 能撤销授权。
+  // 授权窗口自己也撤销不了、列不出列表 —— 它能做的只有回答当前这一问。
+  ipcMain.handle('approval:current', (event) => {
+    assertSender(event, ['approval']);
+    return pendingApproval?.view ?? null;
+  });
+  ipcMain.handle('approval:respond', (event, payload: unknown) => {
+    assertSender(event, ['approval']);
+    assertApprovalResponse(payload);
+    // 超时之后才点的按钮会返回 false（这一问已经结束了），不会改变任何状态
+    return settleApproval(payload.id, payload.decision);
+  });
+  ipcMain.handle('approval:list', (event) => {
+    // 只给 dashboard：授权窗口自己能答"这一问"就够了，用不着看整张授权表
+    assertSender(event, ['dashboard']);
+    return { dirs: readAllowedDirs() } satisfies ApprovalDirsOverview;
+  });
+  ipcMain.handle('approval:revoke', (event, dir: unknown) => {
+    assertSender(event, ['dashboard']);
+    // 路径校验在 pi-approval.ts 的 assertAllowedDir 里（绝对路径 / 不是磁盘根 / 长度上限）。
+    // 这里只删"授权记录"，不删任何文件 —— IPC 永远不提供删文件的能力。
+    removeAllowedDir(dir);
+    return { dirs: readAllowedDirs() } satisfies ApprovalDirsOverview;
+  });
+  // ── 陪伴感知（透明度面板）────────────────────────────────────────────────
+  // 只有 dashboard 能看/清空。两条通道都**结构上拿不到原文**：
+  // companionSnapshot() 组装的对象里只有闭集标签 + 时间戳，没有 title 字段。
+  // 注意这里没有"读取活动"之外的能力：既不能改规则文件，也不能开关采样
+  // （开关在通话窗口的设置面板里，属于 call 的角色）。
+  ipcMain.handle('companion:snapshot', (event) => {
+    assertSender(event, ['dashboard']);
+    return companionSnapshot();
+  });
+  ipcMain.handle('companion:clear', (event) => {
+    assertSender(event, ['dashboard']);
+    // 只清主进程内存里的最近 10 条。本来就没为活动写过任何文件，所以不涉及删文件。
+    clearActivityHistory();
+    return companionSnapshot();
+  });
 }
 
 async function initialize(): Promise<void> {
@@ -1015,6 +1249,9 @@ async function initialize(): Promise<void> {
   reminders = await readValidatedJson(userFile('reminders.json'), [] as Reminder[], parseReminders);
   stats = await readValidatedJson(userFile('pet-stats.json'), defaultStats, parsePersistedStats);
   cozeConfig = await readValidatedJson(userFile('coze-config.json'), defaultChatConfig, parseChatConfig);
+  // 陪伴感知：首次运行写一份分类规则给主人改（%APPDATA%\肆\activity-rules.json）。
+  // 只写文件不启动采样 —— 采样由下面的 restartCompanionSampler 按开关决定。
+  ensureActivityRulesFile();
   normalizeStatsDay();
   sessionStartedAt = Date.now();
   registerIpc();
@@ -1023,6 +1260,8 @@ async function initialize(): Promise<void> {
   createTray();
   reminders.forEach(scheduleReminder);
   restartTypingListener();
+  // 采样器最后起：它在开关关闭时什么都不做（连定时器都不建）
+  restartCompanionSampler();
 }
 
 if (hasSingleInstanceLock) {
@@ -1046,6 +1285,11 @@ app.on('window-all-closed', () => { /* tray app stays alive */ });
 app.on('before-quit', (event) => {
   isQuitting = true;
   typingListener.stop();
+  // 停掉陪伴感知的采样定时器（内存历史跟着进程一起消失，本来就没落盘）
+  stopCompanionSampler?.();
+  stopCompanionSampler = undefined;
+  // 还挂着的授权询问：直接拒绝，别让 pi 的扩展一直等一个永远不来的答复
+  denyPendingApproval();
   for (const timer of reminderTimers.values()) clearTimeout(timer);
   reminderTimers.clear();
   if (quitPersisting || !stats) return;

@@ -299,6 +299,25 @@
           <div class="skill-subtitle">它现在能用的工具</div>
           <div class="tool-list" id="skills-tools"></div>
         </div>
+
+        <div class="settings-group">
+          <div class="section-title">🔓 已授权目录</div>
+          <div class="setting-desc">肆可以直接改这里的文件（这些目录在你的项目目录之外）。撤销之后，它再碰这里就会重新弹窗问你。</div>
+          <div id="approval-dirs"></div>
+        </div>
+
+        <div class="settings-group">
+          <div class="section-title">👀 肆最近看到的活动</div>
+          <div class="setting-desc">
+            开启陪伴感知后，肆每 20~45 分钟随机瞥一眼前台窗口，只看「大概在干什么」。
+            <b>这里显示的只有分类标签和时间</b> —— 窗口标题原文从不出主进程：它在内存里过一遍分类器就被丢掉，不写日志、不写会话文件。这些记录本身也只存在内存里，关掉桌宠就没了。
+          </div>
+          <div class="companion-toolbar">
+            <div class="companion-status" id="companion-status"></div>
+            <button class="skill-btn" id="companion-clear">清空</button>
+          </div>
+          <div id="companion-activities"></div>
+        </div>
       </div>
     </div>
   </div>

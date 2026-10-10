@@ -389,3 +389,85 @@ html, body {
   line-height: 1.5;
   color: var(--text, #333);
 }
+
+/* ── 已授权目录（阶段 F 的授权门）───────────────────────────────────────── */
+
+/* 授权目录的路径用等宽字体：一眼看清是哪个目录，别和技能名混在一起 */
+.approval-dir-path {
+  font-family: Consolas, 'Courier New', monospace;
+  font-weight: normal;
+  font-size: 12px;
+}
+
+/* ── 陪伴感知（👀 肆最近看到的活动）─────────────────────────────────────── */
+
+/* 状态 + 清空按钮一行 */
+.companion-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.companion-status {
+  font-size: 12px;
+  color: var(--muted, #9a7b6a);
+}
+
+/* 一条活动：标签 + 中文说明 + 相对时间。
+   注意这里**只可能**出现闭集标签 —— 窗口标题原文根本到不了渲染层。 */
+.companion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--background, #fff7ed);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.companion-tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text, #3a2a20);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+}
+
+/* 几个高频标签给点颜色，扫一眼就知道大概（纯视觉，不含任何信息量） */
+.companion-tag.tag-coding,
+.companion-tag.tag-terminal {
+  background: rgba(80, 140, 255, 0.16);
+}
+
+.companion-tag.tag-watching-video,
+.companion-tag.tag-listening-music,
+.companion-tag.tag-gaming {
+  background: rgba(255, 140, 80, 0.18);
+}
+
+.companion-tag.tag-meeting,
+.companion-tag.tag-chatting {
+  background: rgba(90, 200, 140, 0.18);
+}
+
+.companion-tag.tag-idle,
+.companion-tag.tag-other {
+  background: rgba(0, 0, 0, 0.05);
+  opacity: 0.75;
+}
+
+.companion-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text, #3a2a20);
+}
+
+.companion-meta {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted, #9a7b6a);
+}

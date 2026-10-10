@@ -1,6 +1,6 @@
 // hash-sync 练习：改锁内文件必须同步哈希
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { CallEvent, ChatConfig, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
+import type { ApprovalDirsOverview, ApprovalRequestView, ApprovalResponseInput, CallEvent, ChatConfig, CompanionSnapshot, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
   const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
@@ -71,6 +71,20 @@ const api: PetAPI = {
     disable: (name) => ipcRenderer.invoke('skills:disable', name) as Promise<SkillsOverview>,
     remove: (name) => ipcRenderer.invoke('skills:remove', name) as Promise<SkillsOverview>,
   },
+  // 授权门（阶段 F）：a) 授权小窗回答"这一问"；b) dashboard 看/撤销已授权目录
+  approval: {
+    list: () => ipcRenderer.invoke('approval:list') as Promise<ApprovalDirsOverview>,
+    revoke: (dir) => ipcRenderer.invoke('approval:revoke', dir) as Promise<ApprovalDirsOverview>,
+    current: () => ipcRenderer.invoke('approval:current') as Promise<ApprovalRequestView | null>,
+    respond: (input: ApprovalResponseInput) => ipcRenderer.invoke('approval:respond', input) as Promise<boolean>,
+    onRequest: (listener) => subscribe<ApprovalRequestView>('approval:request', listener),
+  },
+  // 陪伴感知：只暴露"看最近的活动"和"清空"两个动作。
+  // 返回的 CompanionActivity 里只有闭集标签 + 时间戳 —— 窗口标题原文出不了主进程。
+  companion: {
+    snapshot: () => ipcRenderer.invoke('companion:snapshot') as Promise<CompanionSnapshot>,
+    clear: () => ipcRenderer.invoke('companion:clear') as Promise<CompanionSnapshot>,
+  },
 };
 
 contextBridge.exposeInMainWorld('petAPI', api);
@@ -81,11 +95,12 @@ if (process.env.PET_E2E === '1') {
   });
 }
 
-function currentRole(): 'pet' | 'dashboard' | 'reminder' | undefined {
+function currentRole(): 'pet' | 'dashboard' | 'reminder' | 'approval' | undefined {
   const pathname = window.location.pathname;
   if (pathname.includes('/pet_window/')) return 'pet';
   if (pathname.includes('/dashboard_window/')) return 'dashboard';
   if (pathname.includes('/reminder_window/')) return 'reminder';
+  if (pathname.includes('/approval_window/')) return 'approval';
   return undefined;
 }
 

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>肆想改一个项目外的文件</title>
+</head>
+<body>
+  <div id="approval">
+    <div class="card">
+      <div class="title">🙋 肆想动你项目外面的文件</div>
+
+      <div class="target">
+        <div class="target-row">
+          <span class="tag" id="tool-name">edit</span>
+          <span class="target-path" id="target-path"></span>
+        </div>
+        <div class="target-dir" id="target-dir"></div>
+      </div>
+
+      <div class="hint" id="hint">
+        它在你项目目录之外。只改这一次，还是这个目录以后都放行？
+      </div>
+
+      <div class="countdown" id="countdown">还剩 60 秒</div>
+
+      <div class="btn-col">
+        <button class="btn-once" id="btn-once">仅这次允许</button>
+        <button class="btn-dir" id="btn-dir">这个目录以后都允许</button>
+        <button class="btn-deny" id="btn-deny">拒绝</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

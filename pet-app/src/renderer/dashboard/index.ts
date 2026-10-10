@@ -1,5 +1,5 @@
 import spec from '../../../pet-spec.json';
-import type { PetSpec, PetStats, Settings, SkillInfo, SkillsOverview, InteractionSpec } from '../../shared/contracts';
+import type { ApprovalDirsOverview, CompanionSnapshot, CompanionTag, PetSpec, PetStats, Settings, SkillInfo, SkillsOverview, InteractionSpec } from '../../shared/contracts';
 import './index.css';
 
 // 用于 asset link 检查的占位符（实际不需要导入所有图片）
@@ -34,6 +34,10 @@ const sizeSelector = document.getElementById('size-selector') as HTMLDivElement;
 const skillsEnabledEl = document.getElementById('skills-enabled') as HTMLDivElement;
 const skillsPendingEl = document.getElementById('skills-pending') as HTMLDivElement;
 const skillsToolsEl = document.getElementById('skills-tools') as HTMLDivElement;
+const approvalDirsEl = document.getElementById('approval-dirs') as HTMLDivElement;
+const companionStatusEl = document.getElementById('companion-status') as HTMLDivElement;
+const companionActivitiesEl = document.getElementById('companion-activities') as HTMLDivElement;
+const companionClearBtn = document.getElementById('companion-clear') as HTMLButtonElement;
 
 let currentSettings: Settings | null = null;
 
@@ -246,6 +250,163 @@ async function loadSkills(): Promise<void> {
   }
 }
 
+// ===== 已授权目录（阶段 F 的授权门）=====
+// 授权小窗里选了「这个目录以后都允许」，目录就出现在这儿。
+// [撤销授权] 只删 %APPDATA%\肆\allowed-dirs.json 里的那条记录（**不删任何文件**），
+// 撤掉之后肆再碰这个目录，就会重新弹窗问一遍。
+// 授权是整棵子树的语义，所以撤销父目录时它下面的授权条目也一起撤掉（主进程里做的）。
+async function renderApprovals(overview: ApprovalDirsOverview): Promise<void> {
+  approvalDirsEl.replaceChildren();
+
+  if (overview.dirs.length === 0) {
+    appendEmpty(approvalDirsEl, '还没授权任何目录 —— 它只能改项目目录里的文件');
+    return;
+  }
+
+  for (const dir of overview.dirs) {
+    const row = document.createElement('div');
+    row.className = 'skill-row';
+
+    const head = document.createElement('div');
+    head.className = 'skill-head';
+    const name = document.createElement('div');
+    name.className = 'skill-name approval-dir-path';
+    name.textContent = dir;
+    name.title = dir;
+    const actions = document.createElement('div');
+    actions.className = 'skill-actions';
+    actions.appendChild(skillButton('撤销授权', true, () => {
+      if (!window.confirm(`撤销「${dir}」的授权？以后肆改这个目录里的文件会重新问你。`)) return;
+      void (async () => {
+        try {
+          const next = await window.petAPI?.approval.revoke(dir);
+          if (next) await renderApprovals(next);
+        } catch (error) {
+          console.error('Failed to revoke allowed dir:', error);
+        }
+      })();
+    }));
+    head.append(name, actions);
+    row.appendChild(head);
+
+    const desc = document.createElement('div');
+    desc.className = 'skill-desc';
+    desc.textContent = '肆可以直接改这里的文件（包括子目录）';
+    row.appendChild(desc);
+
+    approvalDirsEl.appendChild(row);
+  }
+}
+
+async function loadApprovals(): Promise<void> {
+  try {
+    const overview = await window.petAPI?.approval.list();
+    if (!overview) return;
+    await renderApprovals(overview);
+  } catch (error) {
+    console.error('Failed to load allowed dirs:', error);
+  }
+}
+
+// ===== 陪伴感知（👀 肆最近看到的活动）=====
+// 这个面板只有"看"和"清空"两个动作，而且**结构上就拿不到原文**：
+// CompanionActivity 里只有闭集标签 + 时间戳，没有 title 字段。
+// 渲染层不做任何裁剪 —— 数据在离开主进程时就已经是标签了。
+
+/** 标签 → 人话（认不出来的标签原样显示，不去猜） */
+const COMPANION_TAG_LABELS: Record<CompanionTag, string> = {
+  coding: '写代码',
+  'working-with-ai': '和 AI 对话',
+  'reading-docs': '看文档',
+  searching: '搜索',
+  browsing: '上网',
+  'watching-video': '看视频',
+  'listening-music': '听音乐',
+  chatting: '聊天',
+  meeting: '开会',
+  gaming: '玩游戏',
+  terminal: '用终端',
+  designing: '做设计',
+  idle: '没在干什么',
+  other: '其它',
+};
+
+/** 相对时间：只给"多久之前"，不给绝对时间戳（够用，也少一点可被回推的信息） */
+function relativeTime(at: number): string {
+  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} 小时前` : `${Math.floor(hours / 24)} 天前`;
+}
+
+function renderCompanion(snapshot: CompanionSnapshot): void {
+  companionActivitiesEl.replaceChildren();
+
+  if (!snapshot.enabled) {
+    companionClearBtn.disabled = true;
+    companionStatusEl.textContent = '陪伴感知：已关闭';
+    appendEmpty(companionActivitiesEl, '还没开启 —— 在通话窗口的 ⚙️ 设置里打开「让肆偶尔看看我在干嘛」之后，这里才会出现记录。关闭状态下它一次都不会去看你的窗口。');
+    return;
+  }
+
+  const count = snapshot.activities.length;
+  companionClearBtn.disabled = count === 0;
+  companionStatusEl.textContent = snapshot.lastSampleAt === null
+    ? '陪伴感知：已开启（还没采到样本）'
+    : `陪伴感知：已开启 · 最近一次 ${relativeTime(snapshot.lastSampleAt)}`;
+
+  if (count === 0) {
+    appendEmpty(companionActivitiesEl, '还没有记录。开启后要等 20~45 分钟才会有第一次采样 —— 不采样的时候它是真的什么都没看。');
+    return;
+  }
+
+  // 新的在最上面（和"最近看到"这个说法一致）
+  for (const activity of [...snapshot.activities].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'companion-row';
+
+    const tag = document.createElement('span');
+    tag.className = `companion-tag tag-${activity.tag}`;
+    tag.textContent = activity.tag;
+    tag.title = COMPANION_TAG_LABELS[activity.tag] ?? activity.tag;
+
+    const label = document.createElement('span');
+    label.className = 'companion-label';
+    label.textContent = COMPANION_TAG_LABELS[activity.tag] ?? activity.tag;
+
+    const meta = document.createElement('span');
+    meta.className = 'companion-meta';
+    meta.textContent = typeof activity.durationMinutes === 'number' && activity.durationMinutes > 0
+      ? `${relativeTime(activity.at)} · 已持续 ${activity.durationMinutes} 分钟`
+      : relativeTime(activity.at);
+
+    row.append(tag, label, meta);
+    companionActivitiesEl.appendChild(row);
+  }
+}
+
+async function loadCompanion(): Promise<void> {
+  try {
+    const snapshot = await window.petAPI?.companion.snapshot();
+    if (!snapshot) return;
+    renderCompanion(snapshot);
+  } catch (error) {
+    console.error('Failed to load companion snapshot:', error);
+  }
+}
+
+companionClearBtn.addEventListener('click', () => {
+  void (async () => {
+    try {
+      const snapshot = await window.petAPI?.companion.clear();
+      if (snapshot) renderCompanion(snapshot);
+    } catch (error) {
+      console.error('Failed to clear companion history:', error);
+    }
+  })();
+});
+
 // 关闭按钮
 closeBtn.addEventListener('click', async () => {
   await window.petAPI?.window.hideDashboard();
@@ -314,6 +475,8 @@ async function init(): Promise<void> {
   await loadSettings();
   await loadStats();
   await loadSkills();
+  await loadApprovals();
+  await loadCompanion();
 }
 
 init();
@@ -321,10 +484,15 @@ init();
 
 // 面板自动刷新：肆写完技能后，不用重启桌宠也能在面板里看到。
 // 主进程只在窗口创建时喂一次数据，所以这里定时刷 + 窗口重新聚焦时刷。
-// 开销可以忽略：技能目录就是两个小文件夹。
+// 开销可以忽略：技能目录就是两个小文件夹，授权目录就是一个小 JSON，
+// 活动历史就是内存里的十条标签。
 window.addEventListener('focus', () => {
   void loadSkills();
+  void loadApprovals();
+  void loadCompanion();
 });
 setInterval(() => {
   void loadSkills();
+  void loadApprovals();
+  void loadCompanion();
 }, 5000);

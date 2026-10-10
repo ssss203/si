@@ -174,6 +174,57 @@ export interface ChatConfig {
    * 改这个值必须重建 pi 会话（扩展是建会话时注册的），见 main.ts 的 call:config-save。
    */
   proactiveActions: boolean;
+  /**
+   * 陪伴感知：让肆偶尔（20~45 分钟随机一次）看一眼当前前台窗口，据此决定要不要搭话。
+   *
+   * 缺省为 **false（opt-in）** —— 关掉时连采样定时器都不建，一次窗口读取都不会发生。
+   * 打开后进对话的**只有闭集标签**（见 CompanionTag），窗口标题原文永不落盘。
+   * 改这个值必须重建 pi 会话（注入是建会话时注册的扩展），见 main.ts 的 call:config-save。
+   */
+  companionAwareness: boolean;
+}
+
+/**
+ * 陪伴感知的闭集标签 —— **唯一**允许进对话的取值。
+ * 与 src/main/pi-companion.ts 的 ACTIVITY_TAGS 必须逐字一致（不一致会编译不过）。
+ * 任何自由文本（尤其是窗口标题片段）都不在允许范围内。
+ */
+export type CompanionTag =
+  | 'coding'
+  | 'working-with-ai'
+  | 'reading-docs'
+  | 'searching'
+  | 'browsing'
+  | 'watching-video'
+  | 'listening-music'
+  | 'chatting'
+  | 'meeting'
+  | 'gaming'
+  | 'terminal'
+  | 'designing'
+  | 'idle'
+  | 'other';
+
+/**
+ * 一条活动记录：**只有标签和时间**。
+ * 这个类型里没有 title 字段是有意的 —— 窗口标题原文不离开主进程，永不落盘、永不上 IPC。
+ */
+export interface CompanionActivity {
+  tag: CompanionTag;
+  /** 采样时刻（epoch ms） */
+  at: number;
+  /** 这次活动持续了多久（分钟）；只有它是"最新那条"时才算得出来 */
+  durationMinutes?: number;
+}
+
+/** dashboard「👀 肆最近看到的活动」要的数据 */
+export interface CompanionSnapshot {
+  /** 陪伴感知开关当前是不是开着 */
+  enabled: boolean;
+  /** 最近一次采样的时刻（epoch ms）；从没采样过就是 null */
+  lastSampleAt: number | null;
+  /** 最近的活动，旧 → 新，最多 10 条 */
+  activities: CompanionActivity[];
 }
 
 /** 一条技能（肆自己写的 or 主人启用过的） */
@@ -216,6 +267,35 @@ export interface EngineRevertResult {
   ok: boolean;
   message: string;
   checkpoint?: EngineCheckpoint;
+}
+
+/** 授权门（阶段 F）主人能做的三个选择 */
+export type ApprovalDecision = 'once' | 'dir' | 'deny';
+
+/** 授权门小窗要显示的东西（主进程 → approval 窗口） */
+export interface ApprovalRequestView {
+  /** 一次询问一个 id；过期的回答会被主进程丢掉 */
+  id: string;
+  /** 是哪个工具想动手（edit / write） */
+  toolName: string;
+  /** 目标文件的绝对路径 */
+  path: string;
+  /** 目标文件所在目录 —— 「这个目录以后都允许」授权的就是它 */
+  dir: string;
+  /** 到这个时间还没操作就自动拒绝（ISO 字符串，渲染层拿它画倒计时） */
+  expiresAt: string;
+}
+
+/** dashboard「🔓 已授权目录」要的数据 */
+export interface ApprovalDirsOverview {
+  /** 已授权的目录绝对路径（含其整棵子树） */
+  dirs: string[];
+}
+
+/** 授权窗口回给主进程的答复 */
+export interface ApprovalResponseInput {
+  id: string;
+  decision: ApprovalDecision;
 }
 
 export interface PetAPI {
@@ -289,6 +369,35 @@ export interface PetAPI {
     disable: (name: string) => Promise<SkillsOverview>;
     /** 删除技能文件 */
     remove: (name: string) => Promise<SkillsOverview>;
+  };
+  /**
+   * 授权门（阶段 F）：肆要改工作目录**外**的文件时，弹小窗问主人。
+   * 三条通道分得清：approval 窗口只回答「当前这一问」，dashboard 只读列表 + 撤销。
+   */
+  approval: {
+    /** 已授权目录（dashboard 面板用） */
+    list: () => Promise<ApprovalDirsOverview>;
+    /** 撤销一个目录的授权（它里面的子目录授权也一起撤销） */
+    revoke: (dir: string) => Promise<ApprovalDirsOverview>;
+    /** 当前这一问（approval 窗口启动时主动拉一次，避免和 loadURL 抢时间） */
+    current: () => Promise<ApprovalRequestView | null>;
+    /** 主人点了某个按钮；返回 true 表示这一问确实还挂着（过期的答复返回 false） */
+    respond: (input: ApprovalResponseInput) => Promise<boolean>;
+    /** 新的一问来了（approval 窗口订阅） */
+    onRequest: (listener: (request: ApprovalRequestView) => void) => () => void;
+  };
+  /**
+   * 陪伴感知（透明度面板）。
+   *
+   * 只有 read + clear 两个动作，而且**结构上拿不到原文**：返回的 CompanionActivity
+   * 里只有闭集标签和时间。清空只清主进程内存里的最近 10 条，不删任何文件
+   * （本来也没为它写过文件）。
+   */
+  companion: {
+    /** 最近看到的活动（标签 + 时间，最多 10 条） */
+    snapshot: () => Promise<CompanionSnapshot>;
+    /** 清空内存里的活动历史 */
+    clear: () => Promise<CompanionSnapshot>;
   };
 }
 
@@ -366,4 +475,18 @@ export function assertRuntimeFailureReport(value: unknown): asserts value is Run
   }
   const obj = value as Record<string, unknown>;
   if (typeof obj.message !== 'string') throw new TypeError('Invalid message');
+}
+
+/** 授权窗口的答复：id 必须是短字符串（主进程用它和当前这一问对号），decision 必须是三个之一 */
+export function assertApprovalResponse(value: unknown): asserts value is ApprovalResponseInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Invalid approval response');
+  }
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.id !== 'string' || obj.id.length === 0 || obj.id.length > 100) {
+    throw new TypeError('Invalid approval id');
+  }
+  if (obj.decision !== 'once' && obj.decision !== 'dir' && obj.decision !== 'deny') {
+    throw new TypeError('Invalid approval decision');
+  }
 }

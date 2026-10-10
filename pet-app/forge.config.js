@@ -72,6 +72,8 @@ module.exports = {
             { html: './src/renderer/reminder/index.html', js: './src/renderer/reminder/index.ts', name: 'reminder_window', preload: { js: './src/preload.ts' } },
             { html: './src/renderer/dashboard/index.html', js: './src/renderer/dashboard/index.ts', name: 'dashboard_window', preload: { js: './src/preload.ts' } },
             { html: './src/renderer/call/index.html', js: './src/renderer/call/index.ts', name: 'call_window', preload: { js: './src/preload.ts' } },
+            // 授权门小窗（阶段 F）：肆要改工作目录外的文件时弹出。懒创建，不进启动时的三窗口门。
+            { html: './src/renderer/approval/index.html', js: './src/renderer/approval/index.ts', name: 'approval_window', preload: { js: './src/preload.ts' } },
           ],
         },
       },

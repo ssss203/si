@@ -37,9 +37,16 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import type { ChatTurn } from '../shared/contracts';
 import { createCheckpointExtension } from './pi-checkpoint';
+import { createApprovalExtension, type RequestApproval } from './pi-approval';
 import { createProjectToolsExtension } from './pi-tools';
 import { createActionsExtension } from './pi-actions';
 import { createSkillsExtension } from './pi-skills';
+// 陪伴感知：把「主人正在干什么」的**闭集标签**注进当前这一轮请求。
+// 为什么新增一个扩展而不是塞进 actions 扩展：这个能力有自己的一整套输入
+// （规则文件 / 分类器 / 采样器），而且它只注册一个 'context' 处理器、不注册工具，
+// 混进 actions 会让那个文件的职责变得含糊。节流仍然共用 actions 那套（反应走 say /
+// play_animation 工具），所以这里**不新开任何绕过节流的通道**。
+import { createCompanionExtension, latestActivity } from './pi-companion';
 
 /** Pi SDK 的类型（type-only import 会被编译期擦除，不会在运行时加载） */
 type PiSdk = typeof import('@earendil-works/pi-coding-agent');
@@ -163,6 +170,11 @@ export interface PiChatStreamOptions {
   onDelta: (delta: string) => void;
   /** 可选：工具调用与动作请求事件（UI 可以显示"正在读文件…"、执行桌宠动作），不传也不影响 */
   onEvent?: (event: EngineEvent) => void;
+  /**
+   * 可选：授权门（阶段 F）。肆要改工作目录**外**的文件时，扩展会调它问主人。
+   * 不传 = 没人可问 = 工作目录外的改动一律被拒（fail-closed，见 pi-approval.ts）。
+   */
+  requestApproval?: RequestApproval;
   signal?: AbortSignal;
 }
 
@@ -249,6 +261,14 @@ function sessionDir(): string {
   return override.length > 0 ? override : path.join(petRoot(), 'pi-sessions');
 }
 
+/**
+ * 授权门（阶段 F）的通道 holder —— 和 chatSession?.sink 一个套路：
+ * 扩展是**建会话时**注册的，而"问主人"这件事只属于**当前这一轮**，
+ * 所以通道放在模块级变量里，piChatStream 每轮开头装上、收尾时摘掉。
+ * 摘掉之后扩展拿到 undefined → fail-closed（工作目录外一律拒绝）。
+ */
+let approvalRequester: RequestApproval | undefined;
+
 /** 下一次建会话时是否强制开一个新的（被中止过 / 用户点了"清空对话"） */
 let forceNewSession = false;
 
@@ -307,22 +327,36 @@ async function getChatSession(
     // 技能 / 提示词模板：只从桌宠自己的目录读（将来 UI 里管理的就是这些文件）
     additionalSkillPaths: [path.join(agentRoot, 'skills')],
     additionalPromptTemplatePaths: [path.join(agentRoot, 'prompts')],
-    // 扩展一：改动前自动存档 + 硬门拦截（阶段 E / F）
-    // 扩展二：自定义工具 run_checks / git_status（阶段 F 的测试安全网 = 阶段 G 的机制）
+    // 扩展一：授权门（阶段 F）—— 改工作目录外的文件前问主人。
+    // ⚠️ 必须排在 checkpoint 之前：pi 的 tool_call 处理器按注册顺序串行跑，
+    // 第一个返回 block 的立刻短路。排在前面，被拒绝的路径就不会留下没人要的存档。
     extensionFactories: [
-      createCheckpointExtension({ cwd: workspace.dir }),
+      createApprovalExtension({
+        cwd: workspace.dir,
+        getRequester: () => approvalRequester,
+      }),
+      // 扩展二：改动前自动存档 + 硬门拦截（阶段 E / F）
+    // 扩展三：自定义工具 run_checks / git_status（阶段 F 的测试安全网 = 阶段 G 的机制）
+    createCheckpointExtension({ cwd: workspace.dir }),
       createProjectToolsExtension({ cwd: workspace.dir }),
-      // 动作工具：它自己动起来（阶段 G）。emit 把动作请求送到"当前这一轮"的事件出口，
+      // 扩展四：动作工具 —— 它自己动起来（阶段 G）。emit 把动作请求送到"当前这一轮"的事件出口，
       // 由 main.ts 去真正执行（播放动画 / 弹气泡 / 建提醒）。
       createActionsExtension({
         cwd: workspace.dir,
         emit: (event) => chatSession?.sink?.onEvent?.(event),
       }),
-      // 扩展四：技能工具（功能 B）。肆可以自己写技能，但只写进 skills-pending；
+      // 扩展五：技能工具（功能 B）。肆可以自己写技能，但只写进 skills-pending；
       // 只有主人批准（移到 skills/）之后，下一次建会话才会被 pi 扫到并加进系统提示词。
       createSkillsExtension({
         cwd: workspace.dir,
         skillsRoot: agentRoot,
+      }),
+      // 扩展六：陪伴感知。注册一个 'context' 处理器，把「活动参考：主人正在 coding（已 25 分钟）。」
+      // 塞进**这一轮请求**（request-local，不落盘 —— 依据见 pi-companion.ts 文件头）。
+      // 它只在历史里有"新鲜"（<10 分钟）标签时才动手；companionAwareness 关掉时
+      // 主进程根本不采样本，历史永远是空的，这里自然什么都不加。
+      createCompanionExtension({
+        getLatest: () => latestActivity(),
       }),
     ],
   });
@@ -371,7 +405,7 @@ async function getChatSession(
  * 逐字通过 onDelta 回调，最后 resolve 出累计的完整文本。
  */
 export async function piChatStream(options: PiChatStreamOptions): Promise<PiReply> {
-  const { apiKey, model, systemPrompt, text, onDelta, onEvent, signal } = options;
+  const { apiKey, model, systemPrompt, text, onDelta, onEvent, requestApproval, signal } = options;
 
   if (!apiKey) throw new Error('DeepSeek 未配置：请先填写 API Key');
 
@@ -390,6 +424,8 @@ export async function piChatStream(options: PiChatStreamOptions): Promise<PiRepl
     },
     onEvent,
   };
+  // 授权门通道：只在这一轮有效（和 sink 同一段生命周期）
+  approvalRequester = requestApproval;
 
   const removeAbortBridge = bridgeAbort(session, signal);
   let completed = false;
@@ -399,6 +435,7 @@ export async function piChatStream(options: PiChatStreamOptions): Promise<PiRepl
   } finally {
     // 先掐断事件出口，再收尾：后面来的残留事件就进不来了
     active.sink = undefined;
+    approvalRequester = undefined;
     removeAbortBridge();
     if (signal?.aborted) forceNewSession = true;
   }

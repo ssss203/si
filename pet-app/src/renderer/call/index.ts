@@ -31,6 +31,7 @@ const dsModelSelect = document.getElementById('ds-model') as HTMLSelectElement;
 const ttsToggle = document.getElementById('toggle-tts') as HTMLDivElement;
 const aiBubbleToggle = document.getElementById('toggle-aibubble') as HTMLDivElement;
 const proactiveToggle = document.getElementById('toggle-proactive') as HTMLDivElement;
+const companionToggle = document.getElementById('toggle-companion') as HTMLDivElement;
 const saveConfigBtn = document.getElementById('save-config') as HTMLButtonElement;
 const saveHint = document.getElementById('save-hint') as HTMLSpanElement;
 
@@ -40,6 +41,9 @@ let config: ChatConfig = {
   ttsEnabled: true,
   aiBubbles: false,
   proactiveActions: true,
+  // 陪伴感知默认关闭（opt-in）—— 渲染层的初值必须和主进程 defaultChatConfig 一致，
+  // 否则"还没加载完就显示成开着"会误导主人。
+  companionAwareness: false,
 };
 let busy = false;
 let currentReply = '';
@@ -167,6 +171,7 @@ async function loadConfig(): Promise<void> {
     ttsToggle.classList.toggle('active', config.ttsEnabled);
     aiBubbleToggle.classList.toggle('active', config.aiBubbles);
     proactiveToggle.classList.toggle('active', config.proactiveActions);
+    companionToggle.classList.toggle('active', config.companionAwareness);
   } catch (error) {
     console.error('Failed to load call config:', error);
   }
@@ -180,6 +185,7 @@ async function saveConfig(): Promise<void> {
       ttsEnabled: config.ttsEnabled,
       aiBubbles: config.aiBubbles,
       proactiveActions: config.proactiveActions,
+      companionAwareness: config.companionAwareness,
     }) ?? config;
     saveHint.textContent = '已保存 ✓';
     saveHint.className = 'save-hint ok';
@@ -303,6 +309,12 @@ aiBubbleToggle.addEventListener('click', () => {
 proactiveToggle.addEventListener('click', () => {
   config.proactiveActions = !config.proactiveActions;
   proactiveToggle.classList.toggle('active', config.proactiveActions);
+});
+// 陪伴感知开关：同样要重建会话（'context' 注入扩展是建会话时注册的），
+// 另外主进程会跟着起/停采样定时器 —— 关掉就是真的不采样。
+companionToggle.addEventListener('click', () => {
+  config.companionAwareness = !config.companionAwareness;
+  companionToggle.classList.toggle('active', config.companionAwareness);
 });
 
 saveConfigBtn.addEventListener('click', () => void saveConfig());
