@@ -8,6 +8,13 @@
  *   3. 调用撤回，检查文件是不是原样回来了
  * 最后再验证受保护路径的拦截函数。
  *
+ * 撤回的语义（修掉 add -A / reset --hard 之后）：
+ *   · 快照只提交这一回合的目标路径（`git commit -- <paths>`，不再 `git add -A`）
+ *   · 撤回只还原那些路径（`git checkout <ref> -- <paths>`，不再 `git reset --hard`）
+ *   所以这里除了"靶子回来了没"，还要断言"靶子以外的工作区一行都没被动过"。
+ *   注意：它会在真实仓库里产生一个 checkpoint(肆) 提交（老行为也是），跑完把靶子的改动撤掉。
+ * 零 API 成本的同类探针见 tools/probe-checkpoint-scope.ts（临时仓库 + 隔离存档）。
+ *
  * 运行（注意环境变量要在一行里设，它决定这一轮开放哪些工具）：
  *   cd F:\ss_yong\si\pet-si\pet-app
  *   $env:PET_PI_TOOLS='read,edit'
@@ -34,9 +41,9 @@ async function sha256(file: string): Promise<string> {
   return createHash('sha256').update(await readFile(file)).digest('hex');
 }
 
-async function gitStatus(cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd, windowsHide: true });
-  return stdout.trim();
+async function gitStatus(cwd: string, extra: string[] = []): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['status', '--porcelain', ...extra], { cwd, windowsHide: true });
+  return stdout.replace(/\r\n/g, '\n').trim();
 }
 
 async function loadPetConfig(): Promise<{ apiKey: string; model: string }> {
@@ -74,10 +81,13 @@ async function main(): Promise<void> {
     console.log(`  ${candidate.padEnd(28)} → ${hit === undefined ? '允许' : `拦截（命中 ${hit}）`}`);
   }
 
-  // ---- 1) 改之前：记下靶子的指纹 ----
+  // ---- 1) 改之前：记下靶子的指纹 + 工作区里"别人的改动" ----
   const before = await sha256(path.join(cwd, TARGET));
+  // 撤回只许动靶子，所以先记下靶子以外的工作区状态，撤回后再比一次（下面测试 3 的断言）
+  const statusBefore = await gitStatus(cwd);
   console.log(`\n--- 测试 1：让肆改靶子文件 ---`);
   console.log(`改前 sha256: ${before.slice(0, 16)}...`);
+  console.log(`改前工作区:\n${statusBefore.length === 0 ? '（空 = 干净）' : statusBefore}`);
 
   const toolNames: string[] = [];
   await piChatStream({
@@ -101,20 +111,34 @@ async function main(): Promise<void> {
   console.log(`\n--- 测试 2：改动与存档记录 ---`);
   console.log(`改后 sha256: ${after.slice(0, 16)}...  → ${after === before ? '❌ 文件没变' : '✅ 文件确实被改了'}`);
   const record = readLatestCheckpoint(cwd);
-  console.log(`存档记录: ${record ? `✅ ${record.ref.slice(0, 10)} (${record.reason})` : '❌ 没有任何存档'}`);
+  console.log(`存档记录: ${record ? `✅ ${record.ref ? record.ref.slice(0, 10) : '（没有 git 快照，只有文件副本）'} (${record.reason})` : '❌ 没有任何存档'}`);
 
-  // ---- 3) 撤回：文件回来了没？----
+  // ---- 3) 撤回：靶子回来了没？别人的改动有没有被顺手抹掉？----
   console.log(`\n--- 测试 3：撤回 ---`);
   const restored = await restoreLatestCheckpoint(cwd);
-  console.log(`撤回目标: ${restored ? restored.ref.slice(0, 10) : '（无记录）'}`);
-  // 注意：不能用字节级 sha256 判断是否还原 —— git reset --hard 会按 core.autocrlf
-  // 规则重新落盘，换行符（CRLF/LF）可能变化，字节不同但 git 认为内容一致。
-  // 真正的语义判断是 git 自己怎么看：工作区应该是干净的。
-  const status = await gitStatus(cwd);
-  console.log(`撤回后 git status: ${status.length === 0 ? '（空 = 干净）' : status}`);
-  console.log(status.length === 0 ? '✅ 工作区已回到存档那一刻' : '❌ 工作区还有差异（需要人工看一眼）');
+  console.log(`撤回目标: ${restored ? (restored.ref ? restored.ref.slice(0, 10) : '（无 ref，只走文件副本）') : '（无记录）'}`);
+  // 判断"靶子回来了没"有两个口径：
+  //   1. 字节级 sha256 —— 撤回走 `git checkout <ref> -- <path>`，同样会按 core.autocrlf
+  //      规则重新落盘，换行符（CRLF/LF）可能变化，字节不同但 git 认为内容一致；
+  //   2. git 自己怎么看这个文件：`git status --porcelain -- <靶子>` 为空 = 它和快照一致。
+  const targetDirty = (await gitStatus(cwd, ['--', TARGET])).length > 0;
   const reverted = await sha256(path.join(cwd, TARGET));
-  console.log(`参考：改前 ${before.slice(0, 16)} / 撤回后 ${reverted.slice(0, 16)}（换行符差异属正常）`);
+  console.log(`撤回后靶子 sha256: ${reverted.slice(0, 16)}...`);
+  console.log(reverted === before || !targetDirty
+    ? '✅ 靶子已回到存档那一刻'
+    : '❌ 靶子没还原（需要人工看一眼）');
+
+  // 新语义（`git checkout <ref> -- <paths>`，不再是 `git reset --hard`）的关键断言：
+  // 撤回**只**还原它动过的那几个文件，靶子以外的东西一行都不许碰。
+  const statusAfter = await gitStatus(cwd);
+  const others = (text: string): string[] =>
+    text.split('\n').map((line) => line.trim()).filter((line) => line.length > 0 && !line.includes(TARGET));
+  const othersBefore = others(statusBefore);
+  const othersAfter = others(statusAfter);
+  console.log(othersBefore.join('|') === othersAfter.join('|')
+    ? '✅ 靶子以外的文件（用户其它未提交改动）一个都没被碰'
+    : `❌ 靶子以外的东西变了：\n  撤回前: ${othersBefore.join(' / ') || '（无）'}\n  撤回后: ${othersAfter.join(' / ') || '（无）'}`);
+  console.log(`（参考）撤回后完整 git status:\n${statusAfter.length === 0 ? '（空 = 干净）' : statusAfter}`);
 
   await resetPiChatSession();
   console.log('\n=== 探针结束 ===');

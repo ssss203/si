@@ -248,7 +248,8 @@ settingsToggle.addEventListener('click', () => {
 });
 
 // 新建对话：清空上下文 + 清空界面消息
-// 撤回按钮：把肆最近的改动回滚到它动手之前的存档（git reset --hard）
+// 撤回按钮：把肆最近的改动回滚到它动手之前的存档
+// （只还原它动过的那几个文件：git checkout <快照> -- <paths>；不碰用户其它未提交改动）
 revertBtn.addEventListener('click', async () => {
   revertBtn.disabled = true;
   try {
