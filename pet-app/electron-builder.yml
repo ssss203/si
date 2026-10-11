@@ -1,0 +1,113 @@
+# electron-builder 配置（独立文件，刻意不塞进 package.json —— 那是受保护文件）
+#
+# 这条通道的目标只有一个：把 .webpack/prod 里**已经编译好的应用** + 生产依赖
+# 打成一个能双击运行的 Windows 产物。它和 Forge 那条 dev 通道（npm run dev）完全无关。
+#
+# 产物目录 release/ 由 collect-release.mjs 清空，所以新脚本不调用它。
+
+appId: com.si.pet
+# productName 保持中文「肆」：开始菜单 / 任务栏 / %APPDATA%\肆 都依赖它
+productName: 肆
+# 但**产物文件名用 ASCII**：中文文件名在 portable/nsis 自解压里容易出乱码
+artifactName: si-pet-${version}-${arch}-${os}.${ext}
+copyright: Copyright © 2025 Desktop Pet Builder User
+
+directories:
+  output: release
+  # ★ 关键：app 目录 = webpack 的生产产物目录。
+  # 不写这一条时 electron-builder 会拿工程根当 app：
+  #   ① scripts/devDependencies 全进来 ② package.json 的 main=".webpack/main" 找不到
+  #   → "Application entry file ... does not exist"
+  app: .webpack/prod
+  buildResources: .
+
+# 已编译应用的位置：Forge 的 plugin-webpack 在生产模式下把 app 根目录当作 .webpack 的内容
+extraMetadata:
+  main: main/index.js
+
+# ── 运行时外部资源（关键，别删）────────────────────────────────────────────────
+# 实测教训：写进上面的 files 列表**没有用** —— electron-builder 在 app 目录里
+# 找 node_modules（搜到的是工程根的），然后用 "app 目录 + 生产依赖" 重新算一遍文件集，
+# 我们自己加的文件会在这一步被丢掉。extraResources 是独立的复制步骤，两个 target 都认。
+#
+# 两个目标位置是**分开**的（__dirname 在打包后是 resources/app/main，所以
+# __dirname/../.. = resources/；app.getAppPath() = resources/app）：
+#   role-card.json              → resources/app/role-card.json  （app.getAppPath()/role-card.json）
+#   tools/foreground-window.ps1 → resources/tools/…             （__dirname/../../tools/…）
+# 写错一处不会崩，只会静默降级（退回内置人设 / 陪伴感知永远采不到样本）。
+extraResources:
+  - from: role-card.json
+    to: app/role-card.json
+  - from: tools/foreground-window.ps1
+    to: tools/foreground-window.ps1
+
+# ── asar 取舍 ─────────────────────────────────────────────────────────────────
+# 关闭 asar（普通目录发布）。原因：pi 是纯 ESM 的 external，运行时在主进程里
+# import('@earendil-works/pi-coding-agent')，它内部会用
+#   createRequire(import.meta.url).resolve('quickjs-wasi/quickjs.wasm')  +  fs.readFileSync
+#   createRequire(import.meta.url).resolve('@silvia-odwyer/photon-node') + 读 photon_rs_bg.wasm
+# 读 wasm 的字节。asar 里 fs.readFileSync 对打包文件是支持的，但 WebAssembly 编译路径、
+# require.resolve 出来的 asar 内路径、以及 .node 二进制都要求真实文件系统 ——
+# 为了"能跑"优先，这里直接发布解包目录（和 dev 模式的 node_modules 形态一致）。
+# 代价：文件数变多、安装目录可被随意翻看。将来要收回体积/完整性，再单独评估 asar + unpack。
+asar: false
+# 下面两条留作将来切 asar 时的现成配置，现在 asar=false 不生效但无害
+asarUnpack:
+  - '**/*.node'
+  - '**/*.wasm'
+
+# ── 打进应用的文件 ────────────────────────────────────────────────────────────
+# 相对"app 目录"（= .webpack/prod）。默认 '**/*' 会连 node_modules 里的 devDependency
+# 一起抓，所以显式列出需要的部分。
+files:
+  - 'package.json'
+  - 'main/**'
+  - 'renderer/**'
+  - 'node_modules/**'
+  # 注意：role-card.json / pet-spec.json / tools/foreground-window.ps1 走上面的
+  # extraResources，**不要**指望这里的列表（实测会被 electron-builder 的
+  # "app 目录 + 生产依赖" 重算过程丢掉，portable 和 nsis 结果还不一样）。
+  # 顶层 esbuild 是 webpack/tsx 那条链的传递 devDependency，运行时不加载
+  - '!node_modules/esbuild/**'
+  - '!node_modules/@esbuild/**'
+  # pi 自带的 @esbuild 是它 node_modules 里给 vitest 用的，360MB 且运行时不加载
+  - '!node_modules/**/@esbuild/**'
+  # 源码映射不进产物（index.js.map 只是调试用；去掉能省掉一大块体积）
+  - '!**/*.js.map'
+  - '!node_modules/.cache/**'
+
+win:
+  icon: .build/app.ico
+  # ⚠️ 这两个 target 必须**分批**构建（见 package.json 的 dist:win：先 portable 再 nsis）。
+  # 实测同时构建（`electron-builder --win`）会在 nsis 的"重新签名 uninstaller"这步炸：
+  #   ⨯ spawn UNKNOWN   at NsisTarget.computeScriptAndSignUninstaller
+  # 单独跑 `electron-builder --win nsis` 就能出 110MB 的安装包，所以是并发写 release/
+  # 导致的偶发冲突，不是配置错误。这里保留两个 target 作为"想要的产物"声明。
+  target:
+    - portable
+    - nsis
+  # 不签名（spec.build.unsigned = true）
+  signAndEditExecutable: true
+
+portable:
+  artifactName: si-pet-${version}-${arch}-portable.${ext}
+  # 不请求管理员权限，双击即用
+  requestExecutionLevel: user
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: si-pet-${version}-${arch}-setup.${ext}
+  shortcutName: 肆
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+
+# ── 自动更新（只留配置，先不接 electron-updater）─────────────────────────────
+# 产物里会生成 latest.yml；将来接 electron-updater 时直接复用这里。
+publish:
+  provider: github
+  owner: ssss203
+  repo: si
+  releaseType: release
