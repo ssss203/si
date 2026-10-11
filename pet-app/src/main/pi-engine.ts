@@ -20,14 +20,23 @@
  *  3. 【完全隔离】auth 与 agent 配置目录都指向桌宠自己的 APPDATA 目录，
  *     不依赖用户电脑上装没装 pi CLI。
  *
- *  4. 【权限逐层放开】见 TOOL_TIERS，当前是第 1 层「只读」。
+ *  4. 【权限逐层放开】见 TOOL_TIERS，默认生效的是第 2 层「读 + 改」
+ *     （read / grep / find / ls / edit / write）。第 1 层「只读」保留着，只是一行开关的事。
  *
  * 安全与正确性边界：
  *  - 工作目录必须通过体检（同时有 package.json 和 src/main.ts）才开放工具。
  *    打包版没有源码树，所以体检全不过时退回**兜底工作区** <petRoot>\workspace
  *    （也是 allowTools: true）；只有连兜底目录都建不出来，才退回"只能说话"。
  *    这是路线图阶段 F 说的「工作目录边界」。
- *  - 互动气泡永远不给工具。
+ *  - 默认能改文件 ≠ 权限放松。放开的是**工作目录之内**的读写，边界一条没动：
+ *    · 工作目录**之外**的路径 → 仍然走 pi-approval.ts 的授权门（弹窗问主人：
+ *      仅这次 / 这个目录以后都允许 / 拒绝），拿不到授权通道时 fail-closed。
+ *    · 硬门（.env / .git/ / node_modules/ / package-lock.json / .pet-builder.json）
+ *      → 永远拒绝，主人授权也解不开（pi-checkpoint.ts 的 isProtectedPath）。
+ *    · 动手之前照样两层存档（pi-checkpoint.ts）：「撤回」仍然可用。
+ *    · 兜底工作区默认是**空的**，主人说"帮我记个笔记"要能新建文件 —— 这就是
+ *      基础层必须同时有 edit 和 write 的原因（pi 的 edit 只改已存在的文件）。
+ *  - 互动气泡永远不给工具（piShortReply 的 tools 恒为空）。
  *  - 会话订阅只建一次，事件只送给「当前这一轮」。
  *  - 被中止（用户点"停止"/超时）的那一轮会脏在会话记忆里 —— pi 会把没答完的
  *    那句话当成还没做完的事，在新一轮里重新做一遍（实测：被中止的"数到 200"
@@ -77,30 +86,43 @@ const MODEL_MAP: Readonly<Record<string, string>> = {
 /**
  * 工具权限分层。一次只放开一层，跑稳了再开下一层。
  *
- *   第 1 层（当前）：read / grep / find / ls —— 只看不动
- *   第 2 层：+ edit（改文案）        ← 开之前先做「改前 git checkpoint + 撤回按钮」
- *   第 3 层：+ write（改样式/新文件）
- *   第 4 层：+ bash（改逻辑/跑测试）  ← 最后才开，且必须有命令白名单
+ *   第 1 层 readOnly：read / grep / find / ls —— 只看不动（保底层，默认不用）
+ *   第 2 层 readEdit（当前默认）：+ edit + write —— 能读也能改
+ *   第 3 层：+ bash（改逻辑/跑测试）  ← 最后才开，且必须有命令白名单
+ *
+ * 为什么默认从第 1 层挪到第 2 层：打包版的工作目录是兜底工作区
+ * <petRoot>\workspace，装完是**空的**，只读等于"装完只能看" —— 主人说"帮我记个
+ * 笔记"它就得能新建文件。pi 的内置工具里 edit 只改**已存在**的文件（它先做
+ * R_OK|W_OK 检查，文件不存在直接报错），所以新建文件必须靠 write：基础层两个都要。
+ *
+ * 放开的是**工作目录之内**的读写；边界语义一条都没松（工作目录外仍走授权门、
+ * 硬门仍永远拒绝、动手前仍两层存档、互动气泡仍不给工具）—— 见文件头的"安全与正确性边界"。
  */
 const TOOL_TIERS = {
   // 注意：自定义工具（run_checks / git_status / 动作工具 / 技能工具）也必须列进来，
   // 否则会被 tools 白名单过滤掉 —— 白名单管的是"所有工具"，不区分内置还是自定义。
   readOnly: ['read', 'grep', 'find', 'ls', 'run_checks', 'git_status', 'play_animation', 'say', 'remind', 'create_skill', 'list_skills'],
-  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'run_checks', 'git_status', 'play_animation', 'say', 'remind', 'create_skill', 'list_skills'],
+  readEdit: ['read', 'grep', 'find', 'ls', 'edit', 'write', 'run_checks', 'git_status', 'play_animation', 'say', 'remind', 'create_skill', 'list_skills'],
 } as const;
 
 /**
+ * 默认生效的那一层。想回到"只看不动"就把它改成 'readOnly'（就这一行）。
+ * 抽成常量是为了让"默认是哪一层"有一个能被探针读到的单一事实来源。
+ */
+const DEFAULT_TIER: keyof typeof TOOL_TIERS = 'readEdit';
+
+/**
  * 这一轮到底开放哪些工具。
- * 默认第 1 层只读；做实验时可以用环境变量临时放开，不用改代码：
- *   $env:PET_PI_TOOLS = 'read,edit'   → 只读 + 改文件
+ * 默认第 2 层（能读也能改）；做实验时可以用环境变量**在它之上再额外放开**，不用改代码：
+ *   $env:PET_PI_TOOLS = 'bash'   → 第 2 层 + bash
  */
 function activeTools(workspace: Workspace): string[] {
   if (!workspace.allowTools) return [];
-  // 只读层（含 run_checks / git_status 两个自定义工具）永远是底座；
-  // 环境变量是在它之上"再额外放开"哪些工具。
+  // 基础层（默认 = 读 + 改，含 run_checks / git_status 两个自定义工具）永远是底座；
+  // 环境变量是在它之上"再额外放开"哪些工具（加法，不是替换）。
   // ⚠️ 不能拿环境变量直接替换整个列表：tools 是白名单，管的是所有工具（内置 + 自定义），
   // 一替换就会把自定义工具一起过滤掉（实测：肆会诚实地说"我跑不了，没有执行工具"）。
-  const base: string[] = [...TOOL_TIERS.readOnly];
+  const base: string[] = [...TOOL_TIERS[DEFAULT_TIER]];
   const extra = (process.env.PET_PI_TOOLS ?? '')
     .split(',')
     .map((name) => name.trim())
@@ -515,8 +537,17 @@ export async function piChatStream(options: PiChatStreamOptions): Promise<PiRepl
 }
 
 /**
+ * 互动气泡那条路径开放的工具：**恒为空**。
+ *
+ * 单独抽成常量（而不是在 piShortReply 里直接写 `tools: []`）是为了让这条不变量
+ * 有一个能被探针断言的单一事实来源 —— 随口一句不该动文件，也不该因为哪天
+ * "顺手放开"而悄悄改掉。
+ */
+const SHORT_REPLY_TOOLS: readonly string[] = [];
+
+/**
  * 一次性短回复（互动气泡用）：不回落到聊天上下文，单独开一个临时会话，
- * 而且【永远不给工具】—— 随口一句，不该动文件。
+ * 而且【永远不给工具】（见 SHORT_REPLY_TOOLS）—— 随口一句，不该动文件。
  * 与 deepseekShortReply 对齐：返回一句话，且最多 60 个字符。
  */
 export async function piShortReply(options: PiShortReplyOptions): Promise<string> {
@@ -544,7 +575,8 @@ export async function piShortReply(options: PiShortReplyOptions): Promise<string
     model: resolved,
     modelRuntime: runtime,
     resourceLoader: loader,
-    tools: [],
+    // 权限：气泡永远不给工具（恒为空的 SHORT_REPLY_TOOLS）
+    tools: [...SHORT_REPLY_TOOLS],
     sessionManager: sdk.SessionManager.inMemory(agentRoot),
   });
 
@@ -596,13 +628,21 @@ export function describeChatSession(): { sessionFile: string | undefined; sessio
   return { sessionFile: chatSessionFile, sessionDir: sessionDir(), forceNew: forceNewSession };
 }
 
-/** 给探针/诊断用：当前它会用哪个工作目录、开不开工具 */
-export function describeWorkspace(): Workspace & { tools: readonly string[] } {
+/** 给探针/诊断用：当前它会用哪个工作目录、开不开工具、默认是哪一层 */
+export function describeWorkspace(): Workspace & { tools: readonly string[]; defaultTier: keyof typeof TOOL_TIERS } {
   const workspace = projectRoot();
-  return { ...workspace, tools: activeTools(workspace) };
+  return { ...workspace, tools: activeTools(workspace), defaultTier: DEFAULT_TIER };
+}
+
+/**
+ * 给探针/诊断用：互动气泡那条路径开放哪些工具（答案永远是空列表）。
+ * 断言它比 grep 源码更结实 —— 以后谁改了这条语义，探针立刻红。
+ */
+export function describeShortReplyTools(): readonly string[] {
+  return SHORT_REPLY_TOOLS;
 }
 
 // TODO(下一步)：
-//  - 第 2 层：开 edit 之前，先做「改前自动 git checkpoint + UI 撤回按钮」
-//  - 第 3/4 层：write / bash 逐层放开，配合命令白名单和 protected paths
+//  - 第 3 层：bash 逐层放开，配合命令白名单和 protected paths
+//  - 默认层的开关搬到设置界面（现在改默认层要改 DEFAULT_TIER 这一行代码）
 //  - App 重启后把历史对话重放进 pi 会话（或用 SessionManager.create + sessionFile 持久化）
