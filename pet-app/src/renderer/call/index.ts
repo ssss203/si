@@ -1,5 +1,5 @@
 import spec from '../../../pet-spec.json';
-import type { CallEvent, ChatConfig, PetSpec } from '../../shared/contracts';
+import type { CallEvent, ChatConfig, PetSpec, UpdateState } from '../../shared/contracts';
 import './index.css';
 
 const petSpec = spec as PetSpec;
@@ -32,6 +32,10 @@ const ttsToggle = document.getElementById('toggle-tts') as HTMLDivElement;
 const aiBubbleToggle = document.getElementById('toggle-aibubble') as HTMLDivElement;
 const proactiveToggle = document.getElementById('toggle-proactive') as HTMLDivElement;
 const companionToggle = document.getElementById('toggle-companion') as HTMLDivElement;
+const updateCheckToggle = document.getElementById('toggle-update-check') as HTMLDivElement;
+const updateBanner = document.getElementById('update-banner') as HTMLDivElement;
+const updateText = document.getElementById('update-text') as HTMLSpanElement;
+const updateDownloadBtn = document.getElementById('update-download-btn') as HTMLButtonElement;
 const saveConfigBtn = document.getElementById('save-config') as HTMLButtonElement;
 const saveHint = document.getElementById('save-hint') as HTMLSpanElement;
 
@@ -44,6 +48,8 @@ let config: ChatConfig = {
   // 陪伴感知默认关闭（opt-in）—— 渲染层的初值必须和主进程 defaultChatConfig 一致，
   // 否则"还没加载完就显示成开着"会误导主人。
   companionAwareness: false,
+  // 检查更新默认开启（不涉及隐私，只发一个匿名请求）
+  checkUpdates: true,
 };
 let busy = false;
 let currentReply = '';
@@ -172,6 +178,7 @@ async function loadConfig(): Promise<void> {
     aiBubbleToggle.classList.toggle('active', config.aiBubbles);
     proactiveToggle.classList.toggle('active', config.proactiveActions);
     companionToggle.classList.toggle('active', config.companionAwareness);
+    updateCheckToggle.classList.toggle('active', config.checkUpdates);
   } catch (error) {
     console.error('Failed to load call config:', error);
   }
@@ -186,6 +193,7 @@ async function saveConfig(): Promise<void> {
       aiBubbles: config.aiBubbles,
       proactiveActions: config.proactiveActions,
       companionAwareness: config.companionAwareness,
+      checkUpdates: config.checkUpdates,
     }) ?? config;
     saveHint.textContent = '已保存 ✓';
     saveHint.className = 'save-hint ok';
@@ -316,6 +324,42 @@ proactiveToggle.addEventListener('click', () => {
 companionToggle.addEventListener('click', () => {
   config.companionAwareness = !config.companionAwareness;
   companionToggle.classList.toggle('active', config.companionAwareness);
+});
+// 检查更新开关：不用重建 pi 会话（和模型无关），只影响下次启动那一次检查。
+// 但当前这次已经查过就不再查了 —— 关掉它不会"撤回"已经弹过的提示，主人点过/关掉就不再出现。
+updateCheckToggle.addEventListener('click', () => {
+  config.checkUpdates = !config.checkUpdates;
+  updateCheckToggle.classList.toggle('active', config.checkUpdates);
+});
+
+// ── 发现新版本：顶部那一行 ──────────────────────────────────────────────────
+// 地址不在这边：点按钮只是让主进程用 shell.openExternal 打开它写死的下载页。
+function renderUpdate(state: UpdateState | null): void {
+  if (!state || typeof state.latestVersion !== 'string') {
+    updateBanner.hidden = true;
+    updateText.textContent = '';
+    return;
+  }
+  updateText.textContent = `发现新版本 ${state.latestVersion}`;
+  updateBanner.hidden = false;
+}
+
+// ① 启动时自己拉一次（主进程的检查是延迟 30 秒跑的，晚开的窗口靠这个对上）
+void window.petAPI?.update.state().then(renderUpdate).catch(() => { });
+// ② 之后主进程推什么就画什么
+window.petAPI?.update.onState(renderUpdate);
+
+updateDownloadBtn.addEventListener('click', async () => {
+  updateDownloadBtn.disabled = true;
+  try {
+    await window.petAPI?.update.open();
+    // 主进程打开下载页时会顺手把状态清成 null 并推一次，那一推会把这一行收起来；
+    // 这里不再自己 renderUpdate(null)，免得"点没点成功"两处各说一套。
+  } catch (error) {
+    addMessage('error', `打开下载页失败：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    updateDownloadBtn.disabled = false;
+  }
 });
 
 saveConfigBtn.addEventListener('click', () => void saveConfig());

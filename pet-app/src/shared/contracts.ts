@@ -182,6 +182,13 @@ export interface ChatConfig {
    * 改这个值必须重建 pi 会话（注入是建会话时注册的扩展），见 main.ts 的 call:config-save。
    */
   companionAwareness: boolean;
+  /**
+   * 自动检查新版本：启动后延迟 30 秒问一次 GitHub，**距上次检查不足 7 天就一次请求都不发**。
+   *
+   * 缺省为 **true** —— 不涉及隐私（只发一个匿名 GET，不带任何本机信息），默认开着才有用。
+   * 关掉时连状态文件都不读写。
+   */
+  checkUpdates: boolean;
 }
 
 /**
@@ -286,8 +293,7 @@ export interface ApprovalRequestView {
   expiresAt: string;
 }
 
-/** dashboard「🔓 已授权目录」要的数据 */
-export interface ApprovalDirsOverview {
+/** dashboard「🔓 已授权目录」要的数据 */export interface ApprovalDirsOverview {
   /** 已授权的目录绝对路径（含其整棵子树） */
   dirs: string[];
 }
@@ -296,6 +302,34 @@ export interface ApprovalDirsOverview {
 export interface ApprovalResponseInput {
   id: string;
   decision: ApprovalDecision;
+}
+
+/**
+ * 「发现新版本」时给通话窗口那行用的一小块数据。
+ *
+ * ⚠️ `url` 由**主进程写死**（RELEASES_PAGE_URL），renderer 拿到的只是一个既成事实的字符串：
+ * 点按钮走的是 `update.open()`，它不接受任何参数 —— 所以渲染层没法借这个口子打开任意链接。
+ */
+export interface UpdateState {
+  /** 远端最新版本，原样（例如 `v1.0.1`） */
+  latestVersion: string;
+  /** 下载页地址（固定值，主进程给） */
+  url: string;
+}
+
+/** 「检查更新」暴露给渲染层的两个动作 + 一个事件 + 一个一次性信号 */
+export interface PetUpdateAPI {
+  /** 当前要不要显示"发现新版本"那一行；没有就 null（渲染层自己拉一次，别等事件） */
+  state: () => Promise<UpdateState | null>;
+  /** 用系统浏览器打开下载页。**没有参数** —— URL 在主进程里，renderer 传不了 */
+  open: () => Promise<boolean>;
+  /** 检查完成后主进程推一次（窗口后开也能对上） */
+  onState: (listener: (state: UpdateState | null) => void) => () => void;
+  /**
+   * 只报"刚刚检查出了一个新版本"这一次 —— 桌宠渲染层拿它在气泡之后补一个小动作。
+   * 和 onState 的区别：onState 是"当前状态"（订阅时会立刻收到一次），这个是"瞬时事件"。
+   */
+  onAvailable: (listener: (state: UpdateState) => void) => () => void;
 }
 
 export interface PetAPI {
@@ -399,6 +433,13 @@ export interface PetAPI {
     /** 清空内存里的活动历史 */
     clear: () => Promise<CompanionSnapshot>;
   };
+  /**
+   * 检查更新（启动时最多每周一次）。
+   *
+   * 只有两个动作 + 一个状态，而且**拿不到也不接受任何 URL**：
+   * 地址是主进程里的常量（GitHub Release 页），renderer 只能"点一下让它开"。
+   */
+  update: PetUpdateAPI;
 }
 
 declare global {

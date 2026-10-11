@@ -3,7 +3,7 @@ import { copyFile, lstat, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import specData from '../pet-spec.json';
-import type { ApprovalDirsOverview, ApprovalDecision, ApprovalRequestView, CallEvent, ChatConfig, ChatTurn, CompanionSnapshot, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
+import type { ApprovalDirsOverview, ApprovalDecision, ApprovalRequestView, CallEvent, ChatConfig, ChatTurn, CompanionSnapshot, InteractionResult, PetSpec, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus, UpdateState } from './shared/contracts';
 import { assertApprovalResponse, assertInteractionId, assertReminderInput, assertRuntimeFailureReport, assertRuntimeReadyReport, assertSettingsPatch, assertStringArray } from './shared/contracts';
 import { draggedBounds, snapBounds, type Point, type Rect } from './main/drag';
 import { JsonLogger } from './main/logger';
@@ -38,6 +38,9 @@ import {
   type CompanionSample,
 } from './main/pi-companion';
 import trayIconPath from './assets/tray/tray-icon.png';
+// 检查更新：启动后延迟 30 秒问一次 GitHub（最多每周一次）。全部决策在 update-check.ts 里，
+// 这里只负责注入 app.getVersion() / sendActivity / logger —— 那个模块不 import electron，探针能直接跑。
+import { RELEASES_PAGE_URL, STARTUP_DELAY_MS, runUpdateCheck } from './main/update-check';
 
 const spec = specData as PetSpec;
 
@@ -147,6 +150,9 @@ const defaultChatConfig: ChatConfig = {
   // 陪伴感知：**默认关闭（opt-in）**。这是隐私相关的开关，必须主人自己打开。
   // 关掉时主进程连采样定时器都不建 —— 一次前台窗口读取都不会发生。
   companionAwareness: false,
+  // 检查更新：默认开 —— 只发一个匿名 GET（不带任何本机信息、不需要 key），
+  // 而且最多每周一次，不含隐私代价。关掉时连 %APPDATA%\肆\update-check.json 都不读写。
+  checkUpdates: true,
 };
 
 let callAbort: AbortController | undefined;
@@ -164,6 +170,8 @@ function parseChatConfig(value: unknown): ChatConfig {
     proactiveActions: typeof obj.proactiveActions === 'boolean' ? obj.proactiveActions : fallback.proactiveActions,
     // 字段级回退：老配置文件里没有这个字段时是 undefined → 落回 false（默认关闭）
     companionAwareness: typeof obj.companionAwareness === 'boolean' ? obj.companionAwareness : fallback.companionAwareness,
+    // 检查更新同理，但它的默认值是 true（老配置文件里没这个字段 → 开着）
+    checkUpdates: typeof obj.checkUpdates === 'boolean' ? obj.checkUpdates : fallback.checkUpdates,
   };
 }
 
@@ -773,6 +781,76 @@ function requestApprovalFromMaster(request: GateApprovalRequest): Promise<Approv
   });
 }
 
+// ── 检查更新：启动时最多每周一次 ─────────────────────────────────────────────
+//
+// 分工和陪伴感知一样：
+//   · 决策、7 天频率、去重、失败静默、状态文件读写 —— 全在 main/update-check.ts（可注入依赖的纯逻辑）
+//   · 这里只做三件事：① 注入 app.getVersion() / sendActivity / logger
+//   ·                ② 启动后延迟 30 秒跑一次
+//   ·                ③ 把"有新版本"记在内存里，让晚开的通话窗口拉得到
+
+/** 当前该不该显示"发现新版本"那一行；null = 没有新版本（或还没查完） */
+let updateState: UpdateState | null = null;
+/** 启动时那一次检查的定时器（退出时要清掉，别让 app 白等 30 秒） */
+let updateCheckTimer: NodeJS.Timeout | undefined;
+/** 正在飞的那次请求（退出时 abort） */
+let updateCheckAbort: AbortController | undefined;
+
+/** 检查结果推给所有开着的窗口（通话窗口没开就算了，它启动时会自己拉一次） */
+function broadcastUpdateState(): void {
+  for (const window of [callWindow, dashboardWindow]) {
+    if (window && !window.isDestroyed()) window.webContents.send('update:state', updateState);
+  }
+}
+
+/**
+ * 跑一次检查。依赖全部现注入 —— 于是这个方法在源码版和打包版里行为一致
+ * （版本号统一来自 app.getVersion()：dev 下读 package.json，打包版读应用版本）。
+ */
+async function checkForUpdates(): Promise<void> {
+  updateCheckAbort?.abort();
+  updateCheckAbort = new AbortController();
+  const controller = updateCheckAbort;
+  try {
+    await runUpdateCheck({
+      currentVersion: app.getVersion(),
+      enabled: cozeConfig?.checkUpdates !== false,
+      // 桌宠气泡：走现成的 state:activity 通道（kind:'interaction' + feedback 就是一句话）。
+      // 窗口还没建好（或已销毁）时 sendActivity 什么都不做 —— 那时返回 false，
+      // 让它照常记 lastNotifiedVersion：别为了一个没画出来的气泡反复骚扰。
+      notifyBubble: (text) => {
+        sendActivity({ kind: 'interaction', feedback: text });
+        const shown = Boolean(petWindow && !petWindow.isDestroyed());
+        void logger?.write('info', 'update-bubble', { text, shown });
+        return shown;
+      },
+      // 只把 { 版本, 固定下载地址 } 交给渲染层；地址是主进程的常量，见 update-check.ts
+      notifyBanner: (state) => {
+        updateState = { latestVersion: state.latestVersion, url: RELEASES_PAGE_URL };
+        broadcastUpdateState();
+      },
+      log: (level, event, details) => { void logger?.write(level, event, details); },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    // runUpdateCheck 自己已经吞掉了所有预期失败；这里兜的是"连它都崩了"的意外
+    void logger?.write('warn', 'update-check-crashed', { message: error instanceof Error ? error.message : String(error) });
+  } finally {
+    if (updateCheckAbort === controller) updateCheckAbort = undefined;
+  }
+}
+
+/** 启动后延迟 30 秒再查：不和窗口创建 / 资源加载抢时间 */
+function scheduleUpdateCheck(): void {
+  if (updateCheckTimer) clearTimeout(updateCheckTimer);
+  updateCheckTimer = setTimeout(() => {
+    updateCheckTimer = undefined;
+    void checkForUpdates();
+  }, STARTUP_DELAY_MS);
+  // 这个定时器不该拖着进程不让退出
+  updateCheckTimer.unref?.();
+}
+
 function buildPetMenu(): Electron.MenuItemConstructorOptions[] {
   const items: Electron.MenuItemConstructorOptions[] = [];
   if (spec.features.interactions) {
@@ -1024,7 +1102,7 @@ function registerIpc(): void {
     assertSender(event, ['call']);
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new TypeError('Invalid call config patch');
     const obj = patch as Record<string, unknown>;
-    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles', 'proactiveActions', 'companionAwareness']);
+    const allowed = new Set(['deepseekApiKey', 'deepseekModel', 'ttsEnabled', 'aiBubbles', 'proactiveActions', 'companionAwareness', 'checkUpdates']);
     for (const key of Object.keys(obj)) {
       if (!allowed.has(key)) throw new TypeError(`Unknown call config field: ${key}`);
     }
@@ -1034,6 +1112,7 @@ function registerIpc(): void {
     if ('aiBubbles' in obj && typeof obj.aiBubbles !== 'boolean') throw new TypeError('Invalid aiBubbles');
     if ('proactiveActions' in obj && typeof obj.proactiveActions !== 'boolean') throw new TypeError('Invalid proactiveActions');
     if ('companionAwareness' in obj && typeof obj.companionAwareness !== 'boolean') throw new TypeError('Invalid companionAwareness');
+    if ('checkUpdates' in obj && typeof obj.checkUpdates !== 'boolean') throw new TypeError('Invalid checkUpdates');
     // 主动行为开关变了要重建 pi 会话：pi 的扩展（这里指 actions 扩展）是**建会话时**注册的，
     // 不重建的话"关掉"只是改了磁盘上的 JSON，工具还在这个会话里活着。
     const proactiveChanged = 'proactiveActions' in obj && obj.proactiveActions !== cozeConfig.proactiveActions;
@@ -1239,6 +1318,22 @@ function registerIpc(): void {
     clearActivityHistory();
     return companionSnapshot();
   });
+  // ── 检查更新（启动时最多每周一次）──────────────────────────────────────────
+  // 两条通道分得清：call 窗口显示那一行 + 点按钮去下载；dashboard 只读"当前状态"。
+  // ⚠️ 这里没有"打开某个 URL"的能力 —— 地址是 update-check.ts 里的常量 RELEASES_PAGE_URL，
+  // renderer 连一个参数都传不进来。
+  ipcMain.handle('update:state', (event) => {
+    assertSender(event, ['call', 'dashboard']);
+    return updateState;
+  });
+  ipcMain.handle('update:open', async (event) => {
+    assertSender(event, ['call', 'dashboard']);
+    // 主人点了「去下载」：这一行以后就不用再显示了（下次有新版本才会再出现）
+    updateState = null;
+    broadcastUpdateState();
+    await shell.openExternal(RELEASES_PAGE_URL);
+    return true;
+  });
 }
 
 async function initialize(): Promise<void> {
@@ -1262,6 +1357,8 @@ async function initialize(): Promise<void> {
   restartTypingListener();
   // 采样器最后起：它在开关关闭时什么都不做（连定时器都不建）
   restartCompanionSampler();
+  // 检查更新排在最后，而且延迟 30 秒才真发请求（别和启动抢资源）
+  scheduleUpdateCheck();
 }
 
 if (hasSingleInstanceLock) {
@@ -1290,6 +1387,11 @@ app.on('before-quit', (event) => {
   stopCompanionSampler = undefined;
   // 还挂着的授权询问：直接拒绝，别让 pi 的扩展一直等一个永远不来的答复
   denyPendingApproval();
+  // 检查更新：清掉启动定时器 + 取消正在飞的请求（退出时不该还在等 GitHub）
+  if (updateCheckTimer) clearTimeout(updateCheckTimer);
+  updateCheckTimer = undefined;
+  updateCheckAbort?.abort();
+  updateCheckAbort = undefined;
   for (const timer of reminderTimers.values()) clearTimeout(timer);
   reminderTimers.clear();
   if (quitPersisting || !stats) return;

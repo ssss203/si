@@ -143,6 +143,53 @@ body {
   color: var(--text, #3a2a20);
 }
 
+/* ── 发现新版本：顶部一行 ──────────────────────────────────────────────────
+   不用 -webkit-app-region: drag（顶栏才拖窗口），按钮也要能点。 */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--background, #fff7ed);
+  border-bottom: 1px solid var(--accent, #ffc987);
+  flex-shrink: 0;
+}
+
+.update-banner[hidden] {
+  display: none !important;
+}
+
+.update-text {
+  font-size: 12px;
+  color: var(--text, #3a2a20);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-btn {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 9px;
+  background: var(--primary, #ff8a24);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+
+.update-btn:hover {
+  opacity: 0.9;
+}
+
+.update-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .config-panel {
   position: absolute;
   top: 56px;

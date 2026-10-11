@@ -1,6 +1,6 @@
 // hash-sync 练习：改锁内文件必须同步哈希
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { ApprovalDirsOverview, ApprovalRequestView, ApprovalResponseInput, CallEvent, ChatConfig, CompanionSnapshot, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus } from './shared/contracts';
+import type { ApprovalDirsOverview, ApprovalRequestView, ApprovalResponseInput, CallEvent, ChatConfig, CompanionSnapshot, EngineCheckpoint, EngineRevertResult, InteractionResult, InteractionSpec, PetAPI, PetStats, Reminder, RuntimeFailureReport, RuntimeReadyReport, Settings, SkillsOverview, StateActivity, TypingStatus, UpdateState } from './shared/contracts';
 
 function subscribe<T>(channel: string, listener: (value: T) => void): () => void {
   const wrapped = (_event: Electron.IpcRendererEvent, value: T) => listener(value);
@@ -84,6 +84,20 @@ const api: PetAPI = {
   companion: {
     snapshot: () => ipcRenderer.invoke('companion:snapshot') as Promise<CompanionSnapshot>,
     clear: () => ipcRenderer.invoke('companion:clear') as Promise<CompanionSnapshot>,
+  },
+  // 检查更新：只有"问状态 / 打开下载页 / 收通知"三个口子。
+  // open() **不接受任何参数** —— 地址是主进程里的常量，渲染层没法借它打开任意链接。
+  update: {
+    state: () => ipcRenderer.invoke('update:state') as Promise<UpdateState | null>,
+    open: () => ipcRenderer.invoke('update:open') as Promise<boolean>,
+    onState: (listener) => subscribe<UpdateState | null>('update:state', listener),
+    onAvailable: (listener) => {
+      // onAvailable 只报"刚查出来的那一次"：主进程推的是 UpdateState 或 null，
+      // 这里把 null（= 主人去下载了 / 状态被清掉）过滤掉，避免渲染层以为"有新版本(null)"。
+      return subscribe<UpdateState | null>('update:state', (state) => {
+        if (state && typeof state.latestVersion === 'string' && typeof state.url === 'string') listener(state);
+      });
+    },
   },
 };
 
