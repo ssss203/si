@@ -9,7 +9,7 @@
     "src/preload.ts": "66352ef6067bd3f69ad982f9cf39a4742b9484efa9ab676b1e0ca45cce62dda6",
     "src/main/data-validation.ts": "b718a4e4648109c5c1f6d054221e5d7f010bf40bf68f98adfbafdd58d3a0baa8",
     "src/renderer/pet/state-machine.ts": "c361129351654bce7fb593152e0ff936df8aa5e9f1f2e06ce9fc7a1beffa49d3",
-    "package.json": "4990c38ae8dc733bfb9ecddc095fd451275be74887b8ab05f11e905a1c2b8dfe",
+    "package.json": "961234175a335c0de13ca116ee991a00d3eae968a11a595222b3bb2927f016bf",
     "package-lock.json": "93fdcc024b6d7101331cba66e28eb90d6b16c39c7ef6f5642d5e0c6469f34e1b",
     "src/shared/contracts.ts": "e5c6a36541d114564cf1d55c746010e762af175d42830fdff663342baed96697",
     "src/renderer/pet/index.ts": "a54f3135deb1bf7f46772510df2d6804db678b6dc4106cba9724de22b9c244d1",

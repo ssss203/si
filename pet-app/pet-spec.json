@@ -3,7 +3,7 @@
   "app": {
     "name": "肆",
     "appId": "com.si.pet",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "language": "zh-CN"
   },
   "targets": {

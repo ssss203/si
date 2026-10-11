@@ -1,7 +1,7 @@
 {
   "name": "com-si-pet",
   "productName": "肆",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Secure cross-platform Electron desktop pet",
   "main": ".webpack/main",
   "private": true,
