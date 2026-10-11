@@ -352,6 +352,24 @@ html, body {
   font-size: 12px;
 }
 
+/* 工作目录这一行：路径可能很长，所以让路径可以折行、按钮不压缩 */
+.workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-path {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--background, #fff7ed);
+  color: var(--text, #3a2a20);
+  font-size: 12px;
+  word-break: break-all;
+}
+
 /* 没有技能 / 没有工具时的灰字 */
 .skill-empty {
   font-size: 12px;

@@ -189,10 +189,17 @@ function skillsRootDir(): string {
   return path.join(process.env.APPDATA ?? path.join(app.getPath('home'), 'AppData', 'Roaming'), '肆');
 }
 
-/** 读技能总览：两个目录 + 它现在真正能用的工具（来自 pi-engine 的白名单体检结果） */
+/** 读技能总览：两个目录 + 它现在真正能用的工具 / 工作目录（都来自 pi-engine 的体检结果） */
 async function readSkillsOverview(): Promise<SkillsOverview> {
   const { enabled, pending } = await describeSkills(skillsRootDir());
-  return { enabled, pending, tools: [...describeWorkspace().tools] };
+  const workspace = describeWorkspace();
+  return {
+    enabled,
+    pending,
+    tools: [...workspace.tools],
+    // 工作目录也在这一刻被"定下来"（打包版会顺手建出 %APPDATA%\肆\workspace）
+    workspace: { dir: workspace.dir, allowTools: workspace.allowTools, mode: workspace.mode },
+  };
 }
 
 // ── 陪伴感知：透明度面板 + 采样器生命周期 ─────────────────────────────────────
@@ -1258,6 +1265,18 @@ function registerIpc(): void {
     await rebuildPiChatSession();
     return readSkillsOverview();
   });
+  // 它现在的工作目录：dashboard 上那个「打开文件夹」按钮。
+  // 路径由主进程自己算（renderer 传不进任何参数）—— 和 update:open 同一套边界。
+  ipcMain.handle('workspace:open', async (event) => {
+    assertSender(event, ['dashboard']);
+    const { dir } = describeWorkspace();
+    const problem = await shell.openPath(dir);
+    if (problem.length > 0) {
+      void logger?.write('warn', 'workspace-open-failed', { dir, message: problem.slice(0, 300) });
+      return false;
+    }
+    return true;
+  });
   ipcMain.handle('call:resize', (event, payload: unknown) => {
     assertSender(event, ['call']);
     if (!callWindow || callWindow.isDestroyed()) throw new Error('Call window is not open');
@@ -1351,6 +1370,16 @@ async function initialize(): Promise<void> {
   sessionStartedAt = Date.now();
   registerIpc();
   await logger.write('info', 'main-initializing', { platform: process.platform, arch: process.arch, version: spec.app.version, schemaVersion: spec.schemaVersion });
+  // 工作目录的启动日志（工作目录也在这里被首次定下来：打包版会顺手建出
+  // %APPDATA%\肆\workspace + README.txt）。为什么值得单独记一条：以前"它在哪工作"
+  // 谁都看不见，打包版退化成"只能聊天"时日志里也没有任何线索。
+  const workspace = describeWorkspace();
+  await logger.write('info', 'workspace-ready', {
+    dir: workspace.dir,
+    mode: workspace.mode,
+    allowTools: workspace.allowTools,
+    tools: [...workspace.tools],
+  });
   createWindows();
   createTray();
   reminders.forEach(scheduleReminder);

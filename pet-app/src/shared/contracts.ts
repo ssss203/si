@@ -244,11 +244,33 @@ export interface SkillInfo {
   updatedAt: string;
 }
 
-/** 技能面板要的全部数据：已启用 / 待批准 / 它现在能用的工具 */
+/**
+ * 它现在的工作目录是"怎么来的"：
+ *   source   = 合格的项目源码目录（package.json + src/main.ts 都在；dev 就是这个）
+ *   fallback = 打包版没有源码树时的兜底工作区 %APPDATA%\肆\workspace
+ *   none     = 连兜底目录都建不出来（只读盘/无权限），它只能说话
+ */
+export type WorkspaceMode = 'source' | 'fallback' | 'none';
+
+/**
+ * 它现在的工作目录（dashboard 显示用）。
+ * 为什么要显示出来：「肆在哪个目录里动手」以前在界面上完全看不见，所以打包版
+ * "只能聊天、不能读写文件"这个 bug 极难被察觉。这里只读，不允许从界面改。
+ */
+export interface WorkspaceInfo {
+  /** 工作目录绝对路径 */
+  dir: string;
+  /** false = 连兜底工作区都不可用，它现在没有工具，只能说话 */
+  allowTools: boolean;
+  mode: WorkspaceMode;
+}
+
+/** 技能面板要的全部数据：已启用 / 待批准 / 它现在能用的工具 / 它现在的工作目录 */
 export interface SkillsOverview {
   enabled: SkillInfo[];
   pending: SkillInfo[];
   tools: string[];
+  workspace: WorkspaceInfo;
 }
 
 export interface ChatTurn {
@@ -403,6 +425,15 @@ export interface PetAPI {
     disable: (name: string) => Promise<SkillsOverview>;
     /** 删除技能文件 */
     remove: (name: string) => Promise<SkillsOverview>;
+  };
+  /**
+   * 它现在的工作目录（只读 + 打开文件夹）。
+   * 路径**只能**由主进程算出来 —— open() 不接受任何参数，renderer 没法借它打开
+   * 任意目录（和 update.open 的边界是同一套）。
+   */
+  workspace: {
+    /** 用系统文件管理器打开它现在的工作目录；返回 true 表示确实打开了 */
+    open: () => Promise<boolean>;
   };
   /**
    * 授权门（阶段 F）：肆要改工作目录**外**的文件时，弹小窗问主人。

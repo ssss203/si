@@ -1,5 +1,5 @@
 import spec from '../../../pet-spec.json';
-import type { ApprovalDirsOverview, CompanionSnapshot, CompanionTag, PetSpec, PetStats, Settings, SkillInfo, SkillsOverview, InteractionSpec } from '../../shared/contracts';
+import type { ApprovalDirsOverview, CompanionSnapshot, CompanionTag, PetSpec, PetStats, Settings, SkillInfo, SkillsOverview, InteractionSpec, WorkspaceInfo } from '../../shared/contracts';
 import './index.css';
 
 // 用于 asset link 检查的占位符（实际不需要导入所有图片）
@@ -34,6 +34,9 @@ const sizeSelector = document.getElementById('size-selector') as HTMLDivElement;
 const skillsEnabledEl = document.getElementById('skills-enabled') as HTMLDivElement;
 const skillsPendingEl = document.getElementById('skills-pending') as HTMLDivElement;
 const skillsToolsEl = document.getElementById('skills-tools') as HTMLDivElement;
+const workspaceDirEl = document.getElementById('workspace-dir') as HTMLDivElement;
+const workspaceHintEl = document.getElementById('workspace-hint') as HTMLDivElement;
+const workspaceOpenBtn = document.getElementById('workspace-open') as HTMLButtonElement;
 const approvalDirsEl = document.getElementById('approval-dirs') as HTMLDivElement;
 const companionStatusEl = document.getElementById('companion-status') as HTMLDivElement;
 const companionActivitiesEl = document.getElementById('companion-activities') as HTMLDivElement;
@@ -229,7 +232,7 @@ async function renderSkills(overview: SkillsOverview): Promise<void> {
   }
 
   if (overview.tools.length === 0) {
-    appendEmpty(skillsToolsEl, '它现在没有工具（工作目录没过体检，只能说话）');
+    appendEmpty(skillsToolsEl, '它现在没有工具（连兜底工作区都建不出来，只能说话）');
   } else {
     for (const tool of overview.tools) {
       const chip = document.createElement('span');
@@ -238,6 +241,25 @@ async function renderSkills(overview: SkillsOverview): Promise<void> {
       skillsToolsEl.appendChild(chip);
     }
   }
+
+  renderWorkspace(overview.workspace);
+}
+
+/**
+ * 工作目录那一行：主人终于能一眼看到"肆到底在哪个目录里动手"。
+ * 以前界面上完全没有这个信息，所以打包版退化成"只能聊天"时几乎没法排查。
+ * 路径只负责显示 —— "改工作目录"是另一个功能，这里不做。
+ */
+function renderWorkspace(info: WorkspaceInfo): void {
+  workspaceDirEl.textContent = info.dir;
+  workspaceDirEl.title = info.dir;
+  workspaceOpenBtn.disabled = false;
+  workspaceHintEl.textContent = info.allowTools
+    ? (info.mode === 'fallback'
+      // 打包版：这是一个自动建出来的工作区目录，得跟主人说清楚它是干什么的
+      ? '这是肆自己的工作区（打包版没有项目源码，所以自动建了这个目录）。你放进去的文件它都能读，它改这里的文件前会自动存档。'
+      : '你放这个目录里的文件它都能读；它要改这里面的文件会先自动存档，改坏了能撤回。')
+    : '这个目录不可用，它现在只能说话，碰不了文件（检查一下目录权限）。';
 }
 
 async function loadSkills(): Promise<void> {
@@ -461,6 +483,16 @@ sizeSelector.addEventListener('click', async (e) => {
     target.classList.add('active');
   } catch (error) {
     console.error('Failed to update pet scale:', error);
+  }
+});
+
+// 工作目录：「打开文件夹」由主进程用 shell.openPath 打开（路径也是主进程算的，
+// 渲染层传不进任何参数）。
+workspaceOpenBtn.addEventListener('click', async () => {
+  try {
+    await window.petAPI?.workspace.open();
+  } catch (error) {
+    console.error('Failed to open workspace:', error);
   }
 });
 

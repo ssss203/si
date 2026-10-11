@@ -71,6 +71,11 @@ const api: PetAPI = {
     disable: (name) => ipcRenderer.invoke('skills:disable', name) as Promise<SkillsOverview>,
     remove: (name) => ipcRenderer.invoke('skills:remove', name) as Promise<SkillsOverview>,
   },
+  // 它现在的工作目录：dashboard 只显示 + 会用一个"打开文件夹"按钮。
+  // open() **不接受任何参数** —— 路径是主进程自己算的，渲染层传不进东西。
+  workspace: {
+    open: () => ipcRenderer.invoke('workspace:open') as Promise<boolean>,
+  },
   // 授权门（阶段 F）：a) 授权小窗回答"这一问"；b) dashboard 看/撤销已授权目录
   approval: {
     list: () => ipcRenderer.invoke('approval:list') as Promise<ApprovalDirsOverview>,

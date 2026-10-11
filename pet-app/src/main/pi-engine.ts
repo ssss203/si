@@ -23,8 +23,10 @@
  *  4. 【权限逐层放开】见 TOOL_TIERS，当前是第 1 层「只读」。
  *
  * 安全与正确性边界：
- *  - 工作目录必须通过体检（同时有 package.json 和 src/main.ts）才开放工具，
- *    否则退回"只能说话"。这是路线图阶段 F 说的「工作目录边界」。
+ *  - 工作目录必须通过体检（同时有 package.json 和 src/main.ts）才开放工具。
+ *    打包版没有源码树，所以体检全不过时退回**兜底工作区** <petRoot>\workspace
+ *    （也是 allowTools: true）；只有连兜底目录都建不出来，才退回"只能说话"。
+ *    这是路线图阶段 F 说的「工作目录边界」。
  *  - 互动气泡永远不给工具。
  *  - 会话订阅只建一次，事件只送给「当前这一轮」。
  *  - 被中止（用户点"停止"/超时）的那一轮会脏在会话记忆里 —— pi 会把没答完的
@@ -34,8 +36,8 @@
  */
 import path from 'node:path';
 import os from 'node:os';
-import { existsSync } from 'node:fs';
-import type { ChatTurn } from '../shared/contracts';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import type { ChatTurn, WorkspaceMode } from '../shared/contracts';
 import { createCheckpointExtension } from './pi-checkpoint';
 import { createApprovalExtension, type RequestApproval } from './pi-approval';
 import { createProjectToolsExtension } from './pi-tools';
@@ -115,32 +117,97 @@ function petRoot(): string {
   return path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), '肆');
 }
 
-/** 工作目录的体检结果：不通过就只让它说话。 */
+/**
+ * 工作目录的体检结果。
+ *
+ * mode 说明这个目录是"怎么来的"（启动日志和 dashboard 都要显示：
+ * "看不见它在哪工作"正是这个 bug 难以察觉的原因）：
+ *   'source'   = 合格的项目源码目录（package.json + src/main.ts 都在）
+ *   'fallback' = 打包版的兜底工作区 <petRoot>\workspace
+ *   'none'     = 连兜底目录都建不出来，退回"只能说话"
+ */
 interface Workspace {
   dir: string;
   allowTools: boolean;
+  mode: WorkspaceMode;
+}
+
+/** 兜底工作区里的说明文件（中文、友善；只在目录第一次被建出来时写一次） */
+const WORKSPACE_README = [
+  '这里是「肆」的工作区。',
+  '',
+  '你可以把它理解成肆自己的一个小抽屉：把你希望它看的文件（笔记、草稿、数据、素材……）',
+  '放进这个目录，聊天时它就能读到；它也可以在这个目录里新建和修改文件。',
+  '',
+  '它改这个目录里的文件之前，会自动先存一份副本（放在 %APPDATA%\\肆\\pi-backups\\ 下面），',
+  '所以改坏了随时能撤回 —— 跟它说一声"撤回"就行。',
+  '',
+  '想换一个目录？给桌宠设环境变量 PET_PI_WORKSPACE 指向你的目录即可（优先级最高）。',
+  '这个说明文件删掉也没关系，它只在目录第一次被创建时写进来。',
+  '',
+].join(os.EOL);
+
+/**
+ * 源码态体检：目录里必须同时有 package.json 和 src/main.ts，也就是"这是一份桌宠
+ * 项目源码"。规则不变 —— 这样即使 cwd 被别的程序改掉，它也不会对着陌生目录乱读。
+ */
+function looksLikeSourceTree(dir: string): boolean {
+  try {
+    return existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'src', 'main.ts'));
+  } catch {
+    // 目录不可读 / 路径非法，当作不合格
+    return false;
+  }
+}
+
+/**
+ * 打包版的兜底工作区：<petRoot>\workspace。
+ *
+ * 为什么需要它（这个 bug 的根因）：打包版的 cwd 是"启动时的当前目录"（双击启动
+ * 常常是 C:\Windows\System32），而应用目录 resources\app\ 里只有 package.json
+ * + main\index.js + renderer\ + node_modules\，**没有 src/main.ts** —— 两个候选都过不了
+ * 体检，于是工具全关、只剩聊天。用户看到的症状就是"能聊天，但不能读写文件"。
+ *
+ * 安全语义（刻意这么选，不是顺手）：
+ *   · 目录在 %APPDATA%\肆\ 下面，不是磁盘根、也不是 %APPDATA%\肆 本身；它在所有
+ *     git 仓库之外 → 授权门照旧把"工作区外"的文件全部拦成弹窗问主人，
+ *     checkpoint 第一层（git 快照）自然用不上、走第二层文件副本 —— 这正是
+ *     "仓库外文件"的既有行为，没有为打包版新开任何特例。
+ *   · 主人用 PET_PI_WORKSPACE 指定的目录仍然优先（在 projectRoot 里先试）。
+ *   · 只有连这个目录都建不出来（只读盘 / 没权限 / 被同名文件占住）才返回 undefined，
+ *     调用方退回 allowTools: false（保留"只能说话"这个安全网），而且**不抛异常**。
+ */
+function fallbackWorkspace(): Workspace | undefined {
+  const dir = path.join(petRoot(), 'workspace');
+  try {
+    const fresh = !existsSync(dir);
+    mkdirSync(dir, { recursive: true });
+    if (fresh) {
+      try {
+        writeFileSync(path.join(dir, 'README.txt'), WORKSPACE_README, 'utf8');
+      } catch {
+        // 只是说明文件写不进去，不影响工具可用性 —— 不值得因此把它关回"只能说话"
+      }
+    }
+    return { dir, allowTools: true, mode: 'fallback' };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * 找到"它被允许动手"的工作目录。
  *
- * 体检规则：目录里必须同时有 package.json 和 src/main.ts —— 也就是"这是一份桌宠
- * 项目源码"。这样即使 cwd 被别的程序改掉（打包后 cwd 常常不是项目目录），它也不会
- * 对着一个陌生目录乱读。
+ * 顺序：PET_PI_WORKSPACE（主人显式指定）→ 当前工作目录（dev 时就是项目目录）
+ *      → 打包版兜底工作区 <petRoot>\workspace → 都没有就只让它说话。
  */
 function projectRoot(): Workspace {
   const candidates = [process.env.PET_PI_WORKSPACE, process.cwd()]
     .filter((value): value is string => typeof value === 'string' && value.length > 0);
   for (const dir of candidates) {
-    try {
-      if (existsSync(path.join(dir, 'package.json')) && existsSync(path.join(dir, 'src', 'main.ts'))) {
-        return { dir, allowTools: true };
-      }
-    } catch {
-      // 目录不可读，试下一个候选
-    }
+    if (looksLikeSourceTree(dir)) return { dir, allowTools: true, mode: 'source' };
   }
-  return { dir: petRoot(), allowTools: false };
+  return fallbackWorkspace() ?? { dir: petRoot(), allowTools: false, mode: 'none' };
 }
 
 /** 引擎事件：工具调用 + 桌宠动作请求（阶段 G） */
