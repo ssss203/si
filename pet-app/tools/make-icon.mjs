@@ -11,7 +11,9 @@ import path from 'node:path';
 import process from 'node:process';
 
 const root = process.cwd();
-const source = path.join(root, 'src', 'assets', 'tray', 'tray-icon.png');
+// 图标源图：默认用高清 badge（2048x2048）；也可以用命令行参数指定其它图片当图标。
+// 早期默认源是 src/assets/tray/tray-icon.png（只有 32x32，放大后会糊）。
+const source = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'incoming-assets', 'badge', 'badge-01.png');
 const target = path.join(root, '.build', 'app.ico');
 const sizes = [256, 128, 64, 48, 32, 16];
 
